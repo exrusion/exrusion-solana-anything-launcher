@@ -200,7 +200,6 @@ app.post("/api/prepare/otc", async (request, response) => {
     const input = launchInput.parse(request.body);
     if (input.otcVenue !== "pump") return response.status(503).json({ error: "OTC Meteora is still behind its funded verification gate. Choose Pump." });
     if (!input.otcPair) return response.status(400).json({ error: "Choose an OTC reward pair." });
-    if (input.initialBuyLamports > 0) return response.status(400).json({ error: "The wallet adapter currently supports an OTC launch with no first buy. Set first buy to 0." });
     const rpc = connection();
     const user = new PublicKey(input.wallet);
     const quoteMint = new PublicKey(input.otcPair);
