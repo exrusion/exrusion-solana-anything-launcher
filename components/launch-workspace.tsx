@@ -203,9 +203,10 @@ export function LaunchWorkspace() {
         <div className="zero-fee"><ShieldCheck size={16}/> Router fee 0%</div>
       </div>
 
+      <div className="provider-heading"><div><strong>Choose a launchpad</strong><span>{mode === "single" ? "One provider, its native workflow" : "Select every route you want to launch"}</span></div><small>{selected.length} selected</small></div>
       <div className="provider-strip">
         {providers.map((provider) => { const active = selected.includes(provider.id); return <button key={provider.id} type="button" className={`provider ${active ? "selected" : ""} ${provider.live ? "" : "gated"}`} onClick={() => choose(provider.id)} aria-pressed={active}>
-          <span className="provider-mark" style={{ background: provider.accent, color: provider.ink }}>{provider.short}</span>
+          <ProviderLogo id={provider.id}/>
           <span className="provider-copy"><strong>{provider.name}</strong><small>{provider.method}</small></span>
           <span className="status-dot">{active ? <Check size={14}/> : provider.live ? "ADAPTER" : "GATED"}</span>
         </button>; })}
@@ -248,7 +249,7 @@ export function LaunchWorkspace() {
     </section>
 
     {results.length ? <section className="route-results"><div className="section-title"><span>Live launch status</span><small>Every signature is tracked independently</small></div>{results.map((result) => { const provider = providerById[result.provider]; return <article key={result.provider} className={`route-row ${result.state}`}>
-      <span className="provider-mark" style={{ background: provider.accent, color: provider.ink }}>{provider.short}</span><div><strong>{provider.name}</strong><small>{result.message}</small>{result.mint ? <code>{result.mint}</code> : null}</div><RouteIcon state={result.state}/>
+      <ProviderLogo id={provider.id}/><div><strong>{provider.name}</strong><small>{result.message}</small>{result.mint ? <code>{result.mint}</code> : null}</div><RouteIcon state={result.state}/>
       {result.signatures?.[0] ? <a href={`https://solscan.io/tx/${result.signatures[0]}`} target="_blank" rel="noreferrer">Explorer <ArrowUpRight size={14}/></a> : null}
       {result.state === "failed" ? <button onClick={() => start([result.provider])}><RotateCcw size={14}/> Retry</button> : null}
     </article>; })}</section> : null}
@@ -288,7 +289,7 @@ function NativeLaunchButton({ walletConnected, onLaunch, label }: Pick<NativeFor
 
 function PumpLaunch({ form, update, preview, onImage, clearImage, walletConnected, onLaunch }: NativeFormProps) {
   return <section className="native-launch pump-native">
-    <div className="native-topbar"><button type="button" aria-label="Back">‹</button><div className="native-search">⌕&nbsp;&nbsp; Search for coins and users… <kbd>⌘ K</kbd></div><span className="native-create">＋</span><span className="pump-sign">Sign in</span></div>
+    <div className="native-topbar"><ProviderLogo id="pump"/><button type="button" aria-label="Back">‹</button><div className="native-search">⌕&nbsp;&nbsp; Search for coins and users… <kbd>⌘ K</kbd></div><span className="native-create">＋</span><span className="pump-sign">Sign in</span></div>
     <div className="pump-grid">
       <div>
         <h2>Create new coin</h2>
@@ -311,7 +312,7 @@ function PumpLaunch({ form, update, preview, onImage, clearImage, walletConnecte
 
 function BonkLaunch({ form, update, preview, onImage, clearImage, walletConnected, onLaunch }: NativeFormProps) {
   return <section className="native-launch bonk-native">
-    <div className="bonk-title"><h2>Create <span>a Token</span></h2><div><button type="button" className={form.bonkTurbo === "on" ? "active" : ""} onClick={() => update("bonkTurbo", form.bonkTurbo === "on" ? "off" : "on")}>♢ Turbo {form.bonkTurbo === "on" ? "On" : "Off"}</button><button type="button">▣ Save Config</button><button type="button">Load Config⌄</button><button type="button">← Back</button></div></div>
+    <div className="native-brand"><ProviderLogo id="bonk"/><strong>BONKfun</strong><span>CREATE</span></div><div className="bonk-title"><h2>Create <span>a Token</span></h2><div><button type="button" className={form.bonkTurbo === "on" ? "active" : ""} onClick={() => update("bonkTurbo", form.bonkTurbo === "on" ? "off" : "on")}>♢ Turbo {form.bonkTurbo === "on" ? "On" : "Off"}</button><button type="button">▣ Save Config</button><button type="button">Load Config⌄</button><button type="button">← Back</button></div></div>
     <div className="bonk-board">
       {!walletConnected ? <div className="bonk-wallet-callout"><span>⌁</span><h3>Wallet Connection Required</h3><p>Please connect your wallet to create a token</p></div> : <div className="bonk-form-grid">
         <div className="bonk-form"><div className="native-kicker">TOKEN DETAILS</div><div className="two"><Field label="Token name" value={form.name} onChange={(v) => update("name", v.slice(0, 32))} placeholder="Name your token"/><Field label="Symbol" value={form.symbol} onChange={(v) => update("symbol", v.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10))} placeholder="BONK"/></div><label className="field"><span>Description</span><textarea value={form.description} onChange={(event) => update("description", event.target.value.slice(0, 500))} placeholder="Describe your token" rows={4}/></label><div className="three"><Field label="Website" value={form.website} onChange={(v) => update("website", v)} placeholder="https://"/><Field label="X" value={form.twitter} onChange={(v) => update("twitter", v)} placeholder="https://x.com/"/><Field label="Telegram" value={form.telegram} onChange={(v) => update("telegram", v)} placeholder="https://t.me/"/></div><div className="two"><Field label="First buy (SOL)" value={form.initialBuy} onChange={(v) => update("initialBuy", v)} placeholder="0"/><Select label="Launch mode" value={form.bonkTurbo} onChange={(v) => update("bonkTurbo", v)} options={[["off", "Classic"], ["on", "Turbo"]]}/></div></div>
@@ -325,7 +326,7 @@ function BonkLaunch({ form, update, preview, onImage, clearImage, walletConnecte
 function StonkLaunch({ form, update, preview, onImage, clearImage, walletConnected, onLaunch }: NativeFormProps) {
   const reward = form.stonkMode === "reward";
   return <section className="native-launch stonk-native">
-    <div className="stonk-heading"><h2>Launch a token</h2><p>Create a fixed-supply token with a one-sided Raydium market quoted against a meme, stock, currency, commodity or any other token.</p></div>
+    <div className="native-brand"><ProviderLogo id="stonk"/><strong>StonkFun</strong><span>LAUNCHLAB ROUTE</span></div><div className="stonk-heading"><h2>Launch a token</h2><p>Create a fixed-supply token with a one-sided Raydium market quoted against a meme, stock, currency, commodity or any other token.</p></div>
     <div className="stonk-grid"><div className="stonk-form">
       <div className="native-label">Launch on</div><span className="stonk-pill">LaunchLab</span>
       <div className="native-label">Fee model</div><div className="wide-tabs"><button type="button" className={!reward ? "chosen" : ""} onClick={() => update("stonkMode", "standard")}>Standard token</button><button type="button" className={reward ? "chosen" : ""} onClick={() => update("stonkMode", "reward")}>Reward token</button></div>
@@ -349,7 +350,8 @@ function ProviderOptions({ id, form, update }: { id: ProviderId; form: LaunchFor
   return <article className={`option-card ${id}-card gated-card`}><OptionHead id={id}/><p>This adapter is present but intentionally disabled until the current SDK-built transaction passes mainnet simulation and a funded confirmation test.</p></article>;
 }
 
-function OptionHead({ id }: { id: ProviderId }) { const provider = providerById[id]; return <header><span className="provider-mark" style={{ background: provider.accent, color: provider.ink }}>{provider.short}</span><div><strong>{provider.name}</strong><small>{provider.live ? "Transaction route enabled" : "Verification gate"}</small></div></header>; }
+function ProviderLogo({ id }: { id: ProviderId }) { const provider = providerById[id]; return <span className="provider-mark" style={{ background: provider.accent, color: provider.ink }}><img src={provider.logo} alt={`${provider.name} logo`}/></span>; }
+function OptionHead({ id }: { id: ProviderId }) { const provider = providerById[id]; return <header><ProviderLogo id={id}/><div><strong>{provider.name}</strong><small>{provider.live ? "Transaction route enabled" : "Verification gate"}</small></div></header>; }
 function Field({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (value: string) => void; placeholder: string }) { return <label className="field"><span>{label}</span><input value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder}/></label>; }
 function Select({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: readonly (readonly [string, string])[] }) { return <label className="field"><span>{label}</span><select value={value} onChange={(event) => onChange(event.target.value)}>{options.map(([option, name]) => <option key={option} value={option}>{name}</option>)}</select></label>; }
 function RouteIcon({ state }: { state: RouteState }) { if (["preparing", "approval", "confirming"].includes(state)) return <LoaderCircle className="spin" size={18}/>; if (state === "success") return <Check size={18}/>; if (state === "failed") return <CircleAlert size={18}/>; return null; }
