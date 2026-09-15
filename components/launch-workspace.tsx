@@ -73,6 +73,7 @@ export function LaunchWorkspace() {
   const update = (key: keyof typeof form, value: string) => setForm((current) => ({ ...current, [key]: value }));
 
   function choose(id: ProviderId) {
+    if (!providerById[id].live) return;
     setSelected((current) => mode === "single" ? [id] : current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
     setOptionsOpen(true);
   }
@@ -203,9 +204,9 @@ export function LaunchWorkspace() {
         <div className="zero-fee"><ShieldCheck size={16}/> Router fee 0%</div>
       </div>
 
-      <div className="provider-heading"><div><strong>Choose a launchpad</strong><span>{mode === "single" ? "One provider, its native workflow" : "Select every route you want to launch"}</span></div><small>{selected.length} selected</small></div>
+      <div className="provider-heading"><div><strong>Choose a launchpad</strong><span>{mode === "single" ? "One provider, its native workflow" : "Select every available route you want to launch"}</span></div><div className="provider-heading-actions">{mode === "multi" ? <><button type="button" onClick={() => setSelected(providers.filter((provider) => provider.live).map((provider) => provider.id))}>Select all available</button><button type="button" onClick={() => setSelected([])}>Clear</button></> : null}<small>{selected.length} selected</small></div></div>
       <div className="provider-strip">
-        {providers.map((provider) => { const active = selected.includes(provider.id); return <button key={provider.id} type="button" className={`provider ${active ? "selected" : ""} ${provider.live ? "" : "gated"}`} onClick={() => choose(provider.id)} aria-pressed={active}>
+        {providers.map((provider) => { const active = selected.includes(provider.id); return <button key={provider.id} type="button" className={`provider provider-${provider.id} ${active ? "selected" : ""} ${provider.live ? "" : "gated"}`} style={{ "--card-accent": provider.accent } as React.CSSProperties} onClick={() => choose(provider.id)} aria-pressed={active} disabled={!provider.live}>
           <ProviderLogo id={provider.id}/>
           <span className="provider-copy"><strong>{provider.name}</strong><small>{provider.method}</small></span>
           <span className="status-dot">{active ? <Check size={14}/> : provider.live ? "ADAPTER" : "GATED"}</span>
@@ -222,10 +223,10 @@ export function LaunchWorkspace() {
         walletConnected={wallet.connected}
         onLaunch={() => start()}
       /> : <>
-      <div className="provider-banner">
+      {mode === "multi" ? <div className="multi-flow-bar"><div><span>01</span><strong>Token details</strong><small>Enter everything once</small></div><i/><div><span>02</span><strong>Route options</strong><small>Only what differs</small></div><i/><div><span>03</span><strong>Wallet approvals</strong><small>Confirm every launch</small></div></div> : <div className="provider-banner">
         <div><span>{primary.name.toUpperCase()} LAUNCH</span><strong>{primary.id === "pump" ? "Create new coin" : primary.id === "bonk" ? "CREATE A TOKEN" : primary.id === "stonk" ? "Launch a token" : primary.id === "otc" ? "LAUNCH A COIN" : `Launch with ${primary.name}`}</strong></div>
         <a href={primary.url} target="_blank" rel="noreferrer">Official site <ExternalLink size={13}/></a>
-      </div>
+      </div>}
 
       <div className="form-layout">
         <label className={`upload ${preview ? "has-image" : ""}`}>
