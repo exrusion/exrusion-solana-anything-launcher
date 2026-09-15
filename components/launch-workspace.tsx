@@ -211,6 +211,16 @@ export function LaunchWorkspace() {
         </button>; })}
       </div>
 
+      {mode === "single" && ["pump", "bonk", "stonk"].includes(primary.id) ? <SingleLaunchExperience
+        id={primary.id}
+        form={form}
+        update={update}
+        preview={preview}
+        onImage={onImage}
+        clearImage={() => { setImage(null); setPreview(""); }}
+        walletConnected={wallet.connected}
+        onLaunch={() => start()}
+      /> : <>
       <div className="provider-banner">
         <div><span>{primary.name.toUpperCase()} LAUNCH</span><strong>{primary.id === "pump" ? "Create new coin" : primary.id === "bonk" ? "CREATE A TOKEN" : primary.id === "stonk" ? "Launch a token" : primary.id === "otc" ? "LAUNCH A COIN" : `Launch with ${primary.name}`}</strong></div>
         <a href={primary.url} target="_blank" rel="noreferrer">Official site <ExternalLink size={13}/></a>
@@ -234,6 +244,7 @@ export function LaunchWorkspace() {
 
       <div className="approval-note"><CircleAlert size={17}/><span>{selected.length} independent launch{selected.length === 1 ? "" : "es"} · expect {approvals} wallet approval{approvals === 1 ? "" : "s"}. Confirm each provider separately; successful routes are skipped on retry.</span></div>
       <button className="launch-button" onClick={() => start()} disabled={!selected.length}>{wallet.connected ? `Prepare ${selected.length} launch${selected.length === 1 ? "" : "es"}` : "Connect wallet to continue"}<ArrowUpRight size={18}/></button>
+      </>}
     </section>
 
     {results.length ? <section className="route-results"><div className="section-title"><span>Live launch status</span><small>Every signature is tracked independently</small></div>{results.map((result) => { const provider = providerById[result.provider]; return <article key={result.provider} className={`route-row ${result.state}`}>
@@ -242,6 +253,91 @@ export function LaunchWorkspace() {
       {result.state === "failed" ? <button onClick={() => start([result.provider])}><RotateCcw size={14}/> Retry</button> : null}
     </article>; })}</section> : null}
   </main>;
+}
+
+type NativeFormProps = {
+  id: ProviderId;
+  form: LaunchForm;
+  update: (key: keyof LaunchForm, value: string) => void;
+  preview: string;
+  onImage: (event: ChangeEvent<HTMLInputElement>) => void;
+  clearImage: () => void;
+  walletConnected: boolean;
+  onLaunch: () => void;
+};
+
+function SingleLaunchExperience(props: NativeFormProps) {
+  if (props.id === "pump") return <PumpLaunch {...props}/>;
+  if (props.id === "bonk") return <BonkLaunch {...props}/>;
+  return <StonkLaunch {...props}/>;
+}
+
+function NativeArtwork({ preview, onImage, clearImage, className = "" }: Pick<NativeFormProps, "preview" | "onImage" | "clearImage"> & { className?: string }) {
+  return <div className={`native-artwork ${className}`}>
+    <label>
+      {preview ? <img src={preview} alt="Token artwork preview"/> : <><ImagePlus size={27}/><strong>Select image to upload</strong><span>or drag and drop it here</span></>}
+      <input type="file" accept="image/png,image/jpeg,image/webp" onChange={onImage}/>
+    </label>
+    {preview ? <button type="button" aria-label="Remove image" onClick={clearImage}><X size={15}/></button> : null}
+  </div>;
+}
+
+function NativeLaunchButton({ walletConnected, onLaunch, label }: Pick<NativeFormProps, "walletConnected" | "onLaunch"> & { label: string }) {
+  return <button type="button" className="native-submit" onClick={onLaunch}>{walletConnected ? label : "Connect wallet"}<ArrowUpRight size={17}/></button>;
+}
+
+function PumpLaunch({ form, update, preview, onImage, clearImage, walletConnected, onLaunch }: NativeFormProps) {
+  return <section className="native-launch pump-native">
+    <div className="native-topbar"><button type="button" aria-label="Back">‹</button><div className="native-search">⌕&nbsp;&nbsp; Search for coins and users… <kbd>⌘ K</kbd></div><span className="native-create">＋</span><span className="pump-sign">Sign in</span></div>
+    <div className="pump-grid">
+      <div>
+        <h2>Create new coin</h2>
+        <div className="pump-section">
+          <h3>Coin details</h3><p>Choose carefully, these can&apos;t be changed once the coin is created</p>
+          <div className="two"><Field label="Coin name" value={form.name} onChange={(v) => update("name", v.slice(0, 32))} placeholder="Name your coin"/><Field label="Ticker" value={form.symbol} onChange={(v) => update("symbol", v.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10))} placeholder="Add a coin ticker (e.g. DOGE)"/></div>
+          <label className="field"><span>Description (Optional)</span><textarea value={form.description} onChange={(event) => update("description", event.target.value.slice(0, 500))} placeholder="Write a short description" rows={4}/></label>
+          <details className="native-details"><summary>↗ &nbsp; Add social links (Optional)</summary><div className="three"><Field label="Website" value={form.website} onChange={(v) => update("website", v)} placeholder="https://"/><Field label="X" value={form.twitter} onChange={(v) => update("twitter", v)} placeholder="https://x.com/"/><Field label="Telegram" value={form.telegram} onChange={(v) => update("telegram", v)} placeholder="https://t.me/"/></div></details>
+          <div className="native-label">Pool liquidity pair</div><div className="choice-row"><button type="button" className="chosen">◎ SOL</button><button type="button" disabled>◉ USDC</button></div>
+          <div className="native-label">Send creator rewards to:</div><div className="wide-tabs"><button type="button" className="chosen">♔ Creator</button><button type="button">♙ Holders</button></div><p>Creator rewards can be shared with wallets or charities from the coin page after your coin has been created.</p>
+          <div className="mayhem-row"><span className="mayhem-icon">〽</span><div><strong>Mayhem mode</strong><small>Increased price volume.</small></div><span className="fake-switch"/></div><p>ⓘ Active for 24h, only set at creation. May increase coin supply.</p>
+        </div>
+        <div className="pump-section media-section"><NativeArtwork preview={preview} onImage={onImage} clearImage={clearImage}/><div className="media-rules"><strong>File size and type</strong><span>Image · max 5 MB · JPG, PNG or WEBP</span><strong>Resolution and aspect ratio</strong><span>Square artwork recommended</span></div></div>
+        <NativeLaunchButton walletConnected={walletConnected} onLaunch={onLaunch} label="Create coin"/>
+      </div>
+      <aside className="pump-preview"><h2>Preview</h2><div>{preview ? <img src={preview} alt="Token preview"/> : <span>A preview of how the coin<br/>will look like</span>}<strong>{form.name || "Your coin"}</strong><small>{form.symbol ? `$${form.symbol}` : "$TICKER"}</small></div></aside>
+    </div>
+  </section>;
+}
+
+function BonkLaunch({ form, update, preview, onImage, clearImage, walletConnected, onLaunch }: NativeFormProps) {
+  return <section className="native-launch bonk-native">
+    <div className="bonk-title"><h2>Create <span>a Token</span></h2><div><button type="button" className={form.bonkTurbo === "on" ? "active" : ""} onClick={() => update("bonkTurbo", form.bonkTurbo === "on" ? "off" : "on")}>♢ Turbo {form.bonkTurbo === "on" ? "On" : "Off"}</button><button type="button">▣ Save Config</button><button type="button">Load Config⌄</button><button type="button">← Back</button></div></div>
+    <div className="bonk-board">
+      {!walletConnected ? <div className="bonk-wallet-callout"><span>⌁</span><h3>Wallet Connection Required</h3><p>Please connect your wallet to create a token</p></div> : <div className="bonk-form-grid">
+        <div className="bonk-form"><div className="native-kicker">TOKEN DETAILS</div><div className="two"><Field label="Token name" value={form.name} onChange={(v) => update("name", v.slice(0, 32))} placeholder="Name your token"/><Field label="Symbol" value={form.symbol} onChange={(v) => update("symbol", v.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10))} placeholder="BONK"/></div><label className="field"><span>Description</span><textarea value={form.description} onChange={(event) => update("description", event.target.value.slice(0, 500))} placeholder="Describe your token" rows={4}/></label><div className="three"><Field label="Website" value={form.website} onChange={(v) => update("website", v)} placeholder="https://"/><Field label="X" value={form.twitter} onChange={(v) => update("twitter", v)} placeholder="https://x.com/"/><Field label="Telegram" value={form.telegram} onChange={(v) => update("telegram", v)} placeholder="https://t.me/"/></div><div className="two"><Field label="First buy (SOL)" value={form.initialBuy} onChange={(v) => update("initialBuy", v)} placeholder="0"/><Select label="Launch mode" value={form.bonkTurbo} onChange={(v) => update("bonkTurbo", v)} options={[["off", "Classic"], ["on", "Turbo"]]}/></div></div>
+        <aside><div className="native-kicker">TOKEN PREVIEW</div><NativeArtwork preview={preview} onImage={onImage} clearImage={clearImage}/><h3>{form.name || "Your token"}</h3><p>{form.symbol ? `$${form.symbol}` : "$TOKEN"}</p><NativeLaunchButton walletConnected={walletConnected} onLaunch={onLaunch} label="Create token"/></aside>
+      </div>}
+    </div>
+    {!walletConnected ? <NativeLaunchButton walletConnected={walletConnected} onLaunch={onLaunch} label="Create token"/> : null}
+  </section>;
+}
+
+function StonkLaunch({ form, update, preview, onImage, clearImage, walletConnected, onLaunch }: NativeFormProps) {
+  const reward = form.stonkMode === "reward";
+  return <section className="native-launch stonk-native">
+    <div className="stonk-heading"><h2>Launch a token</h2><p>Create a fixed-supply token with a one-sided Raydium market quoted against a meme, stock, currency, commodity or any other token.</p></div>
+    <div className="stonk-grid"><div className="stonk-form">
+      <div className="native-label">Launch on</div><span className="stonk-pill">LaunchLab</span>
+      <div className="native-label">Fee model</div><div className="wide-tabs"><button type="button" className={!reward ? "chosen" : ""} onClick={() => update("stonkMode", "standard")}>Standard token</button><button type="button" className={reward ? "chosen" : ""} onClick={() => update("stonkMode", "reward")}>Reward token</button></div>
+      <div className="native-label">Holder rewards tax</div><div className="choice-row">{[["0","None"],["100","1%"],["300","3%"]].map(([value,label]) => <button type="button" key={value} className={form.stonkTax === value ? "chosen" : ""} onClick={() => update("stonkTax", value)}>{label}</button>)}</div><p>A standard token carries no transfer tax. Pick a rate to launch a reward token instead.</p>
+      <div className="stonk-info">ⓘ Your token launches on a bonding curve with no upfront liquidity. It trades against the curve until 85 SOL is raised, then graduates automatically into a Raydium pool.</div>
+      <div className="stonk-divider"/><div className="stonk-row-head"><div><div className="native-label">Dev buy</div><p>Optional. Buy up to 75% of supply as the pool&apos;s first trade.</p></div><div className="choice-row"><button type="button" className="chosen">% of supply</button><button type="button">SOL amount</button></div></div><input className="stonk-range" type="range" min="0" max="75" value={Number(form.stonkDevBuy) || 0} onChange={(event) => update("stonkDevBuy", event.target.value)} aria-label="Dev buy percentage"/><div className="range-labels"><span>0%</span><span>75%</span></div>
+      <div className="stonk-divider"/><div className="two"><Field label="Token name" value={form.name} onChange={(v) => update("name", v.slice(0, 32))} placeholder="e.g. NVDA Doge"/><Field label="Symbol" value={form.symbol} onChange={(v) => update("symbol", v.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10))} placeholder="e.g. NVDGE"/></div>
+      <div className="native-label artwork-label">Token image</div><NativeArtwork preview={preview} onImage={onImage} clearImage={clearImage}/>
+      <div className="stonk-divider"/><div className="native-label">Project links</div><p>Optional. Saved in the token&apos;s permanent metadata.</p><div className="three"><Field label="Website" value={form.website} onChange={(v) => update("website", v)} placeholder="https://www.stonkfun.xyz/"/><Field label="X / Twitter" value={form.twitter} onChange={(v) => update("twitter", v)} placeholder="https://x.com/project"/><Field label="Telegram" value={form.telegram} onChange={(v) => update("telegram", v)} placeholder="https://t.me/project"/></div>
+      <div className="stonk-divider"/><div className="native-label">Quote token</div><p>The launch token will trade against this quote token.</p><div className="quote-tabs"><span>xStocks</span><span>PreStocks</span><span>Currencies</span><span className="chosen">Solana</span><span>Custom</span></div><Select label="Pair" value={form.stonkQuote} onChange={(v) => update("stonkQuote", v)} options={stonkPairs.map(([value,label]) => [value,label])}/>
+    </div><aside className="stonk-summary"><h3>Launch summary</h3>{[["Launchpad","LaunchLab"],["Graduates at","85 SOL raised"],["Supply","1 billion"],["Trading fee","1.25%"],["Transfer tax → holders",form.stonkTax === "0" ? "None" : form.stonkTax === "100" ? "1%" : "3%"],["Curve fee → you earn","0.5% per trade"],["Launch cost","~0.012 SOL"]].map(([label,value]) => <div className="summary-row" key={label}><span>{label}</span><strong>{value}</strong></div>)}<small>network rent only — no router fee</small><div className="summary-notes">♙ Liquidity is permanently locked with Burn &amp; Earn.<br/><br/>◉ Image and metadata are stored permanently on Arweave.</div><NativeLaunchButton walletConnected={walletConnected} onLaunch={onLaunch} label="Launch token"/></aside></div>
+  </section>;
 }
 
 function ProviderOptions({ id, form, update }: { id: ProviderId; form: LaunchForm; update: (key: keyof LaunchForm, value: string) => void }) {
