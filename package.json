@@ -42,5 +42,8 @@
     "@types/react-dom": "^19.2.2",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3"
+  },
+  "optionalDependencies": {
+    "utf-8-validate": "^5.0.10"
   }
 }
