@@ -10,10 +10,11 @@ import { ProviderId, providerById, providers } from "@/lib/providers";
 
 type RouteState = "idle" | "preparing" | "approval" | "confirming" | "success" | "failed";
 type Result = { provider: ProviderId; state: RouteState; message?: string; signatures?: string[]; mint?: string };
+type LaunchRecord = { provider: ProviderId; wallet: string; mint: string; signature: string; signatures?: string[]; name: string; symbol: string; created_at?: string };
 type Metadata = { metadataUri: string; imageUri: string };
-type LaunchForm = { name: string; symbol: string; description: string; website: string; twitter: string; telegram: string; initialBuy: string; metadataUrl: string; bagsConfigKey: string; pumpPair: string; bonkTurbo: string; stonkQuote: string; stonkMode: string; stonkTax: string; stonkDevBuy: string; otcPair: string; otcPairSymbol: string; otcVenue: string };
+type LaunchForm = { name: string; symbol: string; description: string; website: string; twitter: string; telegram: string; initialBuy: string; metadataUrl: string; bagsConfigKey: string; pumpPair: string; bonkTurbo: string; stonkQuote: string; stonkMode: string; stonkTax: string; stonkDevBuy: string; emberQuote: string; emberFee: string; emberGraduate: string; emberMode: string; emberPayout: string; emberShield: string; emberVolatility: string; emberAirdrop: string; otcPair: string; otcPairSymbol: string; otcVenue: string };
 
-const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8787";
+const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
 const stonkPairs = [
   ["So11111111111111111111111111111111111111112", "SOL · Wrapped SOL"],
   ["Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh", "NVDAX · NVIDIA"],
@@ -28,6 +29,11 @@ const otcPairs = [
   ["XsP7xzNPvEHS1m6qfanPUGjNmdnmsLKEoNAnHjdxxyZ", "MSTRx", "MicroStrategy"],
   ["pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn", "PUMP", "Pump"],
   ["DezXAZ8z7PnrnRJjz3wXBoRgixCa6Pc5fB1pPB263", "BONK", "Bonk"],
+] as const;
+const emberPairs = [
+  ["So11111111111111111111111111111111111111112", "SOL · Wrapped SOL"],
+  ["EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "USDC · USD Coin"],
+  ["DezXAZ8z7PnrnRJjz3wXBoRgixCa6Pc5fB1pPB263", "BONK · Bonk"],
 ] as const;
 
 function fromBase64(value: string) {
@@ -59,14 +65,25 @@ export function LaunchWorkspace() {
   const [preview, setPreview] = useState("");
   const [optionsOpen, setOptionsOpen] = useState(true);
   const [results, setResults] = useState<Result[]>([]);
+  const [history, setHistory] = useState<LaunchRecord[]>([]);
   const [form, setForm] = useState({
     name: "", symbol: "", description: "", website: "", twitter: "", telegram: "",
     initialBuy: "0", metadataUrl: "", bagsConfigKey: "", pumpPair: "SOL", bonkTurbo: "off",
     stonkQuote: stonkPairs[0][0], stonkMode: "standard", stonkTax: "0", stonkDevBuy: "0",
+    emberQuote: emberPairs[0][0], emberFee: "200", emberGraduate: "35000", emberMode: "holders", emberPayout: "quote",
+    emberShield: "off", emberVolatility: "off", emberAirdrop: "off",
     otcPair: otcPairs[0][0], otcPairSymbol: otcPairs[0][1], otcVenue: "pump",
   });
 
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
+  useEffect(() => {
+    const local = JSON.parse(localStorage.getItem("solana-anything-launches") || "[]") as LaunchRecord[];
+    setHistory(local);
+    fetch(`${apiUrl}/api/launches`).then((response) => response.ok ? response.json() : Promise.reject()).then((body) => {
+      const remote = Array.isArray(body.launches) ? body.launches as LaunchRecord[] : [];
+      if (remote.length) setHistory(remote);
+    }).catch(() => undefined);
+  }, []);
   const chosen = useMemo(() => providers.filter((provider) => selected.includes(provider.id)), [selected]);
   const primary = chosen[0] || providers[0];
   const approvals = chosen.reduce((sum, provider) => sum + provider.confirmations, 0);
@@ -122,7 +139,7 @@ export function LaunchWorkspace() {
 
   async function runRoute(provider: ProviderId, metadata: Metadata) {
     if (!wallet.publicKey) throw new Error("Connect a Solana wallet first.");
-    if (["stonk", "bonk"].includes(provider) && !image) throw new Error(`${providerById[provider].name} requires the original image file.`);
+    if (["stonk", "ember", "bonk"].includes(provider) && !image) throw new Error(`${providerById[provider].name} requires the original image file.`);
     setRoute(provider, { state: "preparing", message: "Preparing with the official launch route" });
     const logo = image ? await fileDataUrl(image) : "";
     const response = await fetch(`${apiUrl}/api/prepare/${provider}`, {
@@ -152,6 +169,21 @@ export function LaunchWorkspace() {
       return;
     }
 
+    if (prepared.kind === "ember") {
+      setRoute(provider, { state: "approval", message: "Approval 1 of 1 · Ember launch transaction" });
+      const { serialized } = await signPrepared(prepared.transaction, "base64", "legacy");
+      setRoute(provider, { state: "confirming", message: "Ember is submitting the signed launch" });
+      const submitResponse = await fetch(`${apiUrl}/api/submit/ember`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ launchId: prepared.launchId, signedTransaction: serialized }) });
+      const submitted = await submitResponse.json();
+      if (!submitResponse.ok) throw new Error(submitted.error || "Ember submission failed.");
+      const mint = submitted.mint || submitted.mintAddress || submitted.pool || prepared.mint;
+      const signature = submitted.signature || submitted.txSignature || submitted.transactionSignature;
+      if (!mint || !signature) throw new Error("Ember submitted the launch but did not return its mint and signature.");
+      await saveLaunch(provider, mint, [signature]);
+      setRoute(provider, { state: "success", message: "Live on Ember", mint, signatures: [signature] });
+      return;
+    }
+
     const transactions = prepared.transactions || [{ transaction: prepared.transaction, encoding: prepared.encoding || "base64", version: prepared.version || "v0", label: "Create token" }];
     const signatures: string[] = [];
     for (let index = 0; index < transactions.length; index += 1) {
@@ -173,26 +205,30 @@ export function LaunchWorkspace() {
   async function saveLaunch(provider: ProviderId, mint: string, signatures: string[]) {
     const record = { provider, wallet: wallet.publicKey!.toBase58(), mint, signature: signatures[0], signatures, name: form.name, symbol: form.symbol };
     await fetch(`${apiUrl}/api/launches`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(record) });
-    const saved = JSON.parse(localStorage.getItem("solana-anything-launches") || "[]");
-    localStorage.setItem("solana-anything-launches", JSON.stringify([record, ...saved].slice(0, 100)));
+    const saved = JSON.parse(localStorage.getItem("solana-anything-launches") || "[]") as LaunchRecord[];
+    const next = [record, ...saved].slice(0, 100);
+    localStorage.setItem("solana-anything-launches", JSON.stringify(next));
+    setHistory(next);
   }
 
   async function start(ids = selected) {
     if (!wallet.connected) return showWallet(true);
     if (!form.name.trim() || !form.symbol.trim() || !form.description.trim()) return alert("Add the token name, ticker and description.");
     if (!ids.length) return alert("Select at least one launchpad.");
-    let metadata: Metadata;
-    try { metadata = await prepareMetadata(); } catch (error) { return alert(error instanceof Error ? error.message : "Metadata upload failed."); }
+    let metadata: Metadata = { metadataUri: "provider-native", imageUri: "" };
+    if (ids.some((id) => ["pump", "bonk", "otc", "bags"].includes(id))) {
+      try { metadata = await prepareMetadata(); } catch (error) { return alert(error instanceof Error ? error.message : "Metadata upload failed."); }
+    }
     for (const id of ids) {
       if (results.find((item) => item.provider === id)?.state === "success") continue;
       try { await runRoute(id, metadata); } catch (error) { setRoute(id, { state: "failed", message: error instanceof Error ? error.message : "Launch failed." }); }
     }
   }
 
-  return <main className={`workspace theme-${primary.id}`} style={{ "--provider-accent": primary.accent, "--provider-ink": primary.ink } as React.CSSProperties}>
+  return <main id="launch" className={`workspace theme-${primary.id}`} style={{ "--provider-accent": primary.accent, "--provider-ink": primary.ink } as React.CSSProperties}>
     <section className="intro">
-      <div><span className="eyebrow">SOLANA LAUNCH ROUTER</span><h1>One token.<br/><span>Every launch.</span></h1></div>
-      <p>Launch independently across Solana with one wallet, one set of token details and provider-native controls.</p>
+      <div><span className="eyebrow">EIGHT RAILS. ONE SOLANA WORKSPACE.</span><h1>Choose a rail.<br/><span>Launch from here.</span></h1></div>
+      <p>Launch once or prepare the same token for every Solana rail you select. Provider fees stay with each launchpad; Anything takes no cut.</p>
     </section>
 
     <section className="builder-card">
@@ -254,6 +290,20 @@ export function LaunchWorkspace() {
       {result.signatures?.[0] ? <a href={`https://solscan.io/tx/${result.signatures[0]}`} target="_blank" rel="noreferrer">Explorer <ArrowUpRight size={14}/></a> : null}
       {result.state === "failed" ? <button onClick={() => start([result.provider])}><RotateCcw size={14}/> Retry</button> : null}
     </article>; })}</section> : null}
+
+    <section id="launched" className="launched-section">
+      <div className="launched-heading"><div><span className="eyebrow">LIVE HISTORY</span><h2>Launched from here.</h2></div><p>Confirmed launches appear with their provider, mint and Solana explorer link.</p></div>
+      <div className="launched-grid">
+        {history.length ? history.map((launch, index) => { const provider = providerById[launch.provider]; return <article className="launched-card" key={`${launch.signature}-${index}`}>
+          <ProviderLogo id={launch.provider}/><div><span>{provider?.name || launch.provider}</span><strong>{launch.name || "Untitled"} · ${launch.symbol || "TOKEN"}</strong><code>{launch.mint}</code></div><a href={`https://solscan.io/tx/${launch.signature}`} target="_blank" rel="noreferrer" aria-label={`Open ${launch.name} transaction on Solscan`}><ExternalLink size={15}/></a>
+        </article>; }) : <div className="launched-empty"><strong>No confirmed launches on this device yet.</strong><span>Your successful launches will appear here automatically.</span></div>}
+      </div>
+    </section>
+
+    <section id="how-it-works" className="how-section">
+      <span className="eyebrow">HOW IT WORKS</span><h2>One form. Independent approvals.</h2>
+      <div><article><span>01</span><strong>Enter once</strong><p>Add the token identity and artwork once.</p></article><article><span>02</span><strong>Choose rails</strong><p>Use one route or select every enabled Solana launchpad.</p></article><article><span>03</span><strong>Sign safely</strong><p>Your wallet shows and approves each provider transaction.</p></article></div>
+    </section>
   </main>;
 }
 
@@ -346,6 +396,7 @@ function ProviderOptions({ id, form, update }: { id: ProviderId; form: LaunchFor
   if (id === "pump") return <article className="option-card pump-card"><OptionHead id={id}/><div className="option-grid"><Select label="Pool liquidity pair" value={form.pumpPair} onChange={(value) => update("pumpPair", value)} options={[["SOL", "SOL"]]}/><Field label="First buy (SOL)" value={form.initialBuy} onChange={(value) => update("initialBuy", value)} placeholder="0"/></div><p>Creator rewards can be shared on Pump after creation. Mayhem stays off for deterministic routing.</p></article>;
   if (id === "bonk") return <article className="option-card bonk-card"><OptionHead id={id}/><div className="option-grid"><Select label="Turbo" value={form.bonkTurbo} onChange={(value) => update("bonkTurbo", value)} options={[["off", "Turbo off"], ["on", "Turbo on"]]}/><Field label="First buy (SOL)" value={form.initialBuy} onChange={(value) => update("initialBuy", value)} placeholder="0"/></div><p>Creates through BONK’s public Raydium LaunchLab configuration and graduates to Raydium AMM.</p></article>;
   if (id === "stonk") return <article className="option-card stonk-card"><OptionHead id={id}/><div className="option-grid"><Select label="Fee model" value={form.stonkMode} onChange={(value) => update("stonkMode", value)} options={[["standard", "Standard token"], ["reward", "Reward token"]]}/><Select label="Holder rewards tax" value={form.stonkTax} onChange={(value) => update("stonkTax", value)} options={[["0", "None"], ["100", "1%"], ["300", "3%"]]}/><Select label="Quote token" value={form.stonkQuote} onChange={(value) => update("stonkQuote", value)} options={stonkPairs.map(([value, label]) => [value, label])}/><Field label="Dev buy (% supply)" value={form.stonkDevBuy} onChange={(value) => update("stonkDevBuy", value)} placeholder="0"/></div><p>Atomic StonkFun launch: payment, fixed-supply mint, first trade and LaunchLab pool land together or not at all.</p></article>;
+  if (id === "ember") return <article className="option-card ember-card"><OptionHead id={id}/><div className="option-grid"><Select label="Pair" value={form.emberQuote} onChange={(value) => update("emberQuote", value)} options={emberPairs.map(([value, label]) => [value, label])}/><Select label="Trade tax" value={form.emberFee} onChange={(value) => update("emberFee", value)} options={[["100", "1%"], ["200", "2%"], ["300", "3%"]]}/><Select label="Graduation" value={form.emberGraduate} onChange={(value) => update("emberGraduate", value)} options={[["25000", "$25,000"], ["35000", "$35,000"], ["40000", "$40,000"]]}/><Select label="Fee destination" value={form.emberMode} onChange={(value) => update("emberMode", value)} options={[["holders", "Holder rewards"], ["diamond", "Diamond Hands"], ["vault", "Milestone Vault"], ["burn", "Buyback & burn"], ["keep", "Keep it"]]}/><Select label="Payout currency" value={form.emberPayout} onChange={(value) => update("emberPayout", value)} options={[["quote", "Selected pair"], ["sol", "SOL"], ["ember", "EMBER"]]}/><Select label="Sniper Shield" value={form.emberShield} onChange={(value) => update("emberShield", value)} options={[["off", "Off"], ["on", "On"]]}/><Select label="Volatility Dividend" value={form.emberVolatility} onChange={(value) => update("emberVolatility", value)} options={[["off", "Off"], ["on", "On"]]}/><Select label="Graduation airdrop" value={form.emberAirdrop} onChange={(value) => update("emberAirdrop", value)} options={[["off", "Off"], ["on", "5%"]]}/></div><p>Launches on Ember’s Meteora curve. The selected fee module and economics are validated by Ember before your wallet signs.</p></article>;
   if (id === "otc") return <article className="option-card otc-card"><OptionHead id={id}/><div className="option-grid"><Select label="Launch on" value={form.otcVenue} onChange={(value) => update("otcVenue", value)} options={[["pump", "Pump"], ["meteora", "Meteora (verification pending)"]]}/><Select label="Paired with" value={form.otcPair} onChange={(value) => { update("otcPair", value); update("otcPairSymbol", otcPairs.find(([mint]) => mint === value)?.[1] || "CUSTOM"); }} options={otcPairs.map(([value, symbol, name]) => [value, `${symbol} · ${name}`])}/><Select label="Your first buy" value="0" onChange={() => update("initialBuy", "0")} options={[["0", "None · adapter verification"]]}/></div><div className="split-bar"><span style={{width:"67.5%"}}>Holders 67.5%</span><span style={{width:"10%"}}>Desks</span><span style={{width:"22.5%"}}>Other</span></div><p>Two wallet confirmations: create the paired Pump V2 coin, then lock its creator-fee routing to OTC.</p></article>;
   if (id === "bags") return <article className="option-card bags-card"><OptionHead id={id}/><div className="option-grid"><Field label="Bags config key" value={form.bagsConfigKey} onChange={(value) => update("bagsConfigKey", value)} placeholder="Launch config public key"/><Field label="First buy (SOL)" value={form.initialBuy} onChange={(value) => update("initialBuy", value)} placeholder="0"/></div><p>The backend needs a Bags developer key; the key stays server-side and your wallet signs the returned transaction.</p></article>;
   return <article className={`option-card ${id}-card gated-card`}><OptionHead id={id}/><p>This adapter is present but intentionally disabled until the current SDK-built transaction passes mainnet simulation and a funded confirmation test.</p></article>;

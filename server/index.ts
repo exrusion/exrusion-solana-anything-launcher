@@ -2,6 +2,7 @@ import "dotenv/config";
 import cors from "cors";
 import express from "express";
 import multer from "multer";
+import next from "next";
 import { Pool } from "pg";
 import { z } from "zod";
 import BN from "bn.js";
@@ -35,6 +36,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 *
 const port = Number(process.env.PORT || 8787);
 const rpcUrl = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
 const allowedOrigins = (process.env.WEB_ORIGIN || "http://localhost:3000").split(",").map((item) => item.trim());
+const emberApiBase = String(process.env.EMBER_API_BASE || "https://embercurve.fun").replace(/\/$/, "");
 const OTC_ORIGIN = "https://otcdesks.cash";
 const OTC_REWARD_WALLET = new PublicKey(process.env.OTC_REWARD_WALLET || "2k5hrzuykwyTbUe8L7UriYAQhr5hijNLgBvEB4B9pP5y");
 const PUMP_PROGRAM_ID = new PublicKey("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P");
@@ -50,6 +52,8 @@ const launchInput = z.object({
   metadataUri: z.string().min(1), imageUri: z.string().optional(), logo: z.string().max(7_000_000).optional(),
   wallet: z.string().min(32).max(64), initialBuyLamports: z.number().int().nonnegative(), bagsConfigKey: z.string().optional(),
   bonkTurbo: z.string().optional(), stonkQuote: z.string().optional(), stonkMode: z.string().optional(), stonkTax: z.string().optional(), stonkDevBuy: z.string().optional(),
+  emberQuote: z.string().optional(), emberFee: z.string().optional(), emberGraduate: z.string().optional(), emberMode: z.string().optional(), emberPayout: z.string().optional(),
+  emberShield: z.string().optional(), emberVolatility: z.string().optional(), emberAirdrop: z.string().optional(),
   otcPair: z.string().optional(), otcPairSymbol: z.string().optional(), otcVenue: z.string().optional(),
 });
 
@@ -77,10 +81,18 @@ async function fetchJson(url: string, init: RequestInit = {}) {
 function dataOf<T>(payload: Record<string, unknown>) { return (payload.data || payload) as T; }
 function connection() { return new Connection(rpcUrl, "confirmed"); }
 
+function imageBlob(dataUrl: string) {
+  const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,([a-zA-Z0-9+/=]+)$/);
+  if (!match) throw new Error("A valid token image is required.");
+  const bytes = Buffer.from(match[2], "base64");
+  if (!bytes.length || bytes.length > 5 * 1024 * 1024) throw new Error("The token image must be 5 MB or smaller.");
+  return { blob: new Blob([Uint8Array.from(bytes)], { type: match[1] }), type: match[1] };
+}
+
 app.get("/health", async (_request, response) => {
   let rpc = false;
   try { await connection().getLatestBlockhash("confirmed"); rpc = true; } catch { rpc = false; }
-  response.status(rpc ? 200 : 503).json({ ok: rpc, network: "solana-mainnet", feeBps: 0, storage: db ? "postgres" : "memory", adapters: ["pump", "bonk", "stonk", "otc", "bags"] });
+  response.status(rpc ? 200 : 503).json({ ok: rpc, network: "solana-mainnet", feeBps: 0, storage: db ? "postgres" : "memory", adapters: ["pump", "stonk", "ember", "bonk", "bags", "otc"] });
 });
 
 app.get("/api/providers", async (_request, response) => {
@@ -88,10 +100,11 @@ app.get("/api/providers", async (_request, response) => {
   try { const stats = dataOf<{ config?: { apiLaunchesEnabled?: boolean } }>(await fetchJson("https://www.stonkfun.xyz/api/public/v1/stats")); stonkLive = Boolean(stats.config?.apiLaunchesEnabled); } catch { stonkLive = false; }
   response.json({ providers: [
     { id: "pump", preparation: "enabled", method: "pump.fun create transaction" },
-    { id: "bonk", preparation: "enabled", method: "Raydium SDK + BONK platform config" },
     { id: "stonk", preparation: stonkLive ? "enabled" : "provider_unavailable", method: "StonkFun public v1" },
-    { id: "otc", preparation: "enabled", method: "Pump SDK V2 + OTC fee assignment" },
+    { id: "ember", preparation: "enabled", method: "Ember Meteora launch API" },
+    { id: "bonk", preparation: "enabled", method: "Raydium SDK + BONK platform config" },
     { id: "bags", preparation: process.env.BAGS_API_KEY ? "enabled" : "needs_api_key", method: "Bags API v2" },
+    { id: "otc", preparation: "enabled", method: "Pump SDK V2 + OTC fee assignment" },
     { id: "raydium", preparation: "verification_required", method: "Raydium SDK v2" },
     { id: "meteora", preparation: "verification_required", method: "Meteora DBC SDK" },
   ] });
@@ -151,6 +164,64 @@ app.post("/api/submit/stonk", async (request, response) => {
 app.get("/api/status/stonk/:signature", async (request, response) => {
   try { response.json(dataOf(await fetchJson(`https://www.stonkfun.xyz/api/public/v1/launches/${encodeURIComponent(request.params.signature)}`))); }
   catch (error) { response.status(502).json({ error: error instanceof Error ? error.message : "StonkFun status failed." }); }
+});
+
+app.post("/api/prepare/ember", async (request, response) => {
+  try {
+    const input = launchInput.parse(request.body);
+    if (!input.logo) return response.status(400).json({ error: "Ember requires the original token image." });
+    const image = imageBlob(input.logo);
+    const imageForm = new FormData();
+    imageForm.append("file", image.blob, `token.${image.type.split("/")[1] || "png"}`);
+    const uploaded = await fetchJson(`${emberApiBase}/api/upload/image`, { method: "POST", body: imageForm });
+    const imageUrl = String(uploaded.url || dataOf<{ url?: string }>(uploaded).url || "");
+    if (!imageUrl) throw new Error("Ember image upload did not return a URL.");
+    const metadataPayload = await fetchJson(`${emberApiBase}/api/upload/metadata`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: input.name, symbol: input.symbol, description: input.description, image: imageUrl, website: input.website || "", x: input.twitter || "", telegram: input.telegram || "" }),
+    });
+    const uri = String(metadataPayload.uri || dataOf<{ uri?: string }>(metadataPayload).uri || "");
+    if (!uri) throw new Error("Ember metadata upload did not return a URI.");
+    const feeBps = [100, 200, 300].includes(Number(input.emberFee)) ? Number(input.emberFee) : 200;
+    const graduateUsd = [25000, 35000, 40000].includes(Number(input.emberGraduate)) ? Number(input.emberGraduate) : 35000;
+    const prepared = dataOf<Record<string, unknown>>(await fetchJson(`${emberApiBase}/api/solana/launch`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "prepare",
+        creatorWallet: input.wallet,
+        name: input.name,
+        symbol: input.symbol,
+        uri,
+        image: imageUrl,
+        description: input.description,
+        links: { website: input.website || "", x: input.twitter || "", telegram: input.telegram || "" },
+        quoteMint: input.emberQuote || "So11111111111111111111111111111111111111112",
+        feeBps,
+        graduateUsd,
+        mode: input.emberMode || "holders",
+        splits: [],
+        holdersBps: 10_000,
+        payInQuote: input.emberPayout !== "sol",
+        payMint: input.emberPayout === "ember" ? "EMBER" : undefined,
+        addons: { shield: input.emberShield === "on", volatilityFee: input.emberVolatility === "on", airdropPct: input.emberAirdrop === "on" ? 5 : 0 },
+      }),
+    }));
+    if (!prepared.transaction || !prepared.launchId) throw new Error("Ember did not return a launch transaction.");
+    response.json({ kind: "ember", transaction: prepared.transaction, launchId: prepared.launchId, mint: prepared.mint || prepared.mintAddress });
+  } catch (error) { response.status(422).json({ error: error instanceof Error ? error.message : "Ember preparation failed." }); }
+});
+
+app.post("/api/submit/ember", async (request, response) => {
+  try {
+    const body = z.object({ launchId: z.string().min(1), signedTransaction: z.string().min(20) }).parse(request.body);
+    response.json(dataOf(await fetchJson(`${emberApiBase}/api/solana/launch`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "submit", launchId: body.launchId, signedTransaction: body.signedTransaction }),
+    })));
+  } catch (error) { response.status(422).json({ error: error instanceof Error ? error.message : "Ember submission failed." }); }
 });
 
 type RayConfig = { key: { pubKey: string; index: number; mintB: string; tradeFeeRate: string; epoch: string; curveType: number; migrateFee: string; maxShareFeeRate: string; minSupplyA: string; maxLockRate: string; minSellRateA: string; minMigrateRateA: string; minFundRaisingB: string; protocolFeeOwner: string; migrateFeeOwner: string; migrateToAmmWallet: string; migrateToCpmmWallet: string }; mintInfoB: { decimals: number; programId: string }; defaultParams: { supplyInit: string; totalSellA: string; totalFundRaisingB: string } };
@@ -266,4 +337,13 @@ app.get("/api/launches", async (request, response) => {
   response.json({ launches: result.rows });
 });
 
-initializeDatabase().then(() => app.listen(port, "0.0.0.0", () => console.log(`Solana Anything API listening on ${port}`))).catch((error) => { console.error(error); process.exit(1); });
+async function start() {
+  await initializeDatabase();
+  const nextApp = next({ dev: process.env.NODE_ENV !== "production" });
+  await nextApp.prepare();
+  const nextHandler = nextApp.getRequestHandler();
+  app.use((request, response) => nextHandler(request, response));
+  app.listen(port, "0.0.0.0", () => console.log(`Anything Solana listening on ${port}`));
+}
+
+start().catch((error) => { console.error(error); process.exit(1); });
