@@ -67,8 +67,8 @@ async function initializeDatabase() {
   await db.query("ALTER TABLE launches ADD COLUMN IF NOT EXISTS signatures JSONB NOT NULL DEFAULT '[]'");
 }
 
-async function fetchJson(url: string, init: RequestInit = {}) {
-  const response = await fetch(url, { ...init, signal: AbortSignal.timeout(60_000) });
+async function fetchJson(url: string, init: RequestInit = {}, timeoutMs = 60_000) {
+  const response = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
   const data = await response.json().catch(() => ({})) as Record<string, unknown>;
   if (!response.ok) {
     const nested = data.error as { message?: string; code?: string } | string | undefined;
@@ -97,7 +97,7 @@ app.get("/health", async (_request, response) => {
 
 app.get("/api/providers", async (_request, response) => {
   let stonkLive = false;
-  try { const stats = dataOf<{ config?: { apiLaunchesEnabled?: boolean } }>(await fetchJson("https://www.stonkfun.xyz/api/public/v1/stats")); stonkLive = Boolean(stats.config?.apiLaunchesEnabled); } catch { stonkLive = false; }
+  try { const stats = dataOf<{ config?: { apiLaunchesEnabled?: boolean } }>(await fetchJson("https://www.stonkfun.xyz/api/public/v1/stats", {}, 5_000)); stonkLive = Boolean(stats.config?.apiLaunchesEnabled); } catch { stonkLive = false; }
   response.json({ providers: [
     { id: "pump", preparation: "enabled", method: "pump.fun create transaction" },
     { id: "stonk", preparation: stonkLive ? "enabled" : "provider_unavailable", method: "StonkFun public v1" },

@@ -11,6 +11,7 @@ import { ProviderId, providerById, providers } from "@/lib/providers";
 type RouteState = "idle" | "preparing" | "approval" | "confirming" | "success" | "failed";
 type Result = { provider: ProviderId; state: RouteState; message?: string; signatures?: string[]; mint?: string };
 type LaunchRecord = { provider: ProviderId; wallet: string; mint: string; signature: string; signatures?: string[]; name: string; symbol: string; created_at?: string };
+type ProviderState = "enabled" | "needs_api_key" | "provider_unavailable" | "verification_required";
 type Metadata = { metadataUri: string; imageUri: string };
 type LaunchForm = { name: string; symbol: string; description: string; website: string; twitter: string; telegram: string; initialBuy: string; metadataUrl: string; bagsConfigKey: string; pumpPair: string; bonkTurbo: string; stonkQuote: string; stonkMode: string; stonkTax: string; stonkDevBuy: string; emberQuote: string; emberFee: string; emberGraduate: string; emberMode: string; emberPayout: string; emberShield: string; emberVolatility: string; emberAirdrop: string; otcPair: string; otcPairSymbol: string; otcVenue: string };
 
@@ -66,6 +67,7 @@ export function LaunchWorkspace() {
   const [optionsOpen, setOptionsOpen] = useState(true);
   const [results, setResults] = useState<Result[]>([]);
   const [history, setHistory] = useState<LaunchRecord[]>([]);
+  const [providerStates, setProviderStates] = useState<Partial<Record<ProviderId, ProviderState>>>({});
   const [form, setForm] = useState({
     name: "", symbol: "", description: "", website: "", twitter: "", telegram: "",
     initialBuy: "0", metadataUrl: "", bagsConfigKey: "", pumpPair: "SOL", bonkTurbo: "off",
@@ -84,13 +86,27 @@ export function LaunchWorkspace() {
       if (remote.length) setHistory(remote);
     }).catch(() => undefined);
   }, []);
+  useEffect(() => {
+    fetch(`${apiUrl}/api/providers`).then((response) => response.ok ? response.json() : Promise.reject()).then((body) => {
+      const states = Object.fromEntries((body.providers || []).map((provider: { id: ProviderId; preparation: ProviderState }) => [provider.id, provider.preparation]));
+      setProviderStates(states);
+    }).catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    if (!Object.keys(providerStates).length) return;
+    setSelected((current) => {
+      const available = current.filter((id) => providerById[id].live && !["needs_api_key", "provider_unavailable", "verification_required"].includes(providerStates[id] || "enabled"));
+      return available.length ? available : ["pump"];
+    });
+  }, [providerStates]);
   const chosen = useMemo(() => providers.filter((provider) => selected.includes(provider.id)), [selected]);
   const primary = chosen[0] || providers[0];
   const approvals = chosen.reduce((sum, provider) => sum + provider.confirmations, 0);
   const update = (key: keyof typeof form, value: string) => setForm((current) => ({ ...current, [key]: value }));
+  const routeAvailable = (id: ProviderId) => providerById[id].live && !["needs_api_key", "provider_unavailable", "verification_required"].includes(providerStates[id] || "enabled");
 
   function choose(id: ProviderId) {
-    if (!providerById[id].live) return;
+    if (!routeAvailable(id)) return;
     setSelected((current) => mode === "single" ? [id] : current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
     setOptionsOpen(true);
   }
@@ -240,12 +256,12 @@ export function LaunchWorkspace() {
         <div className="zero-fee"><ShieldCheck size={16}/> Router fee 0%</div>
       </div>
 
-      <div className="provider-heading"><div><strong>Choose a launchpad</strong><span>{mode === "single" ? "One provider, its native workflow" : "Select every available route you want to launch"}</span></div><div className="provider-heading-actions">{mode === "multi" ? <><button type="button" onClick={() => setSelected(providers.filter((provider) => provider.live).map((provider) => provider.id))}>Select all available</button><button type="button" onClick={() => setSelected([])}>Clear</button></> : null}<small>{selected.length} selected</small></div></div>
+      <div className="provider-heading"><div><strong>Choose a launchpad</strong><span>{mode === "single" ? "One provider, its native workflow" : "Select every available route you want to launch"}</span></div><div className="provider-heading-actions">{mode === "multi" ? <><button type="button" onClick={() => setSelected(providers.filter((provider) => routeAvailable(provider.id)).map((provider) => provider.id))}>Select all available</button><button type="button" onClick={() => setSelected([])}>Clear</button></> : null}<small>{selected.length} selected</small></div></div>
       <div className="provider-strip">
-        {providers.map((provider) => { const active = selected.includes(provider.id); return <button key={provider.id} type="button" className={`provider provider-${provider.id} ${active ? "selected" : ""} ${provider.live ? "" : "gated"}`} style={{ "--card-accent": provider.accent } as React.CSSProperties} onClick={() => choose(provider.id)} aria-pressed={active} disabled={!provider.live}>
+        {providers.map((provider) => { const active = selected.includes(provider.id); const available = routeAvailable(provider.id); const state = providerStates[provider.id]; return <button key={provider.id} type="button" className={`provider provider-${provider.id} ${active ? "selected" : ""} ${available ? "" : "gated"}`} style={{ "--card-accent": provider.accent } as React.CSSProperties} onClick={() => choose(provider.id)} aria-pressed={active} disabled={!available}>
           <ProviderLogo id={provider.id}/>
           <span className="provider-copy"><strong>{provider.name}</strong><small>{provider.method}</small></span>
-          <span className="status-dot">{active ? <Check size={14}/> : provider.live ? "ADAPTER" : "GATED"}</span>
+          <span className="status-dot">{active ? <Check size={14}/> : state === "needs_api_key" ? "KEY" : state === "provider_unavailable" ? "OFFLINE" : available ? "ADAPTER" : "GATED"}</span>
         </button>; })}
       </div>
 
