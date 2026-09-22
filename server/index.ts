@@ -26,7 +26,7 @@ import {
   DynamicBondingCurveClient,
   buildCurve,
 } from "@meteora-ag/dynamic-bonding-curve-sdk";
-import { PUMP_SDK, feeSharingConfigPda } from "@pump-fun/pump-sdk";
+import { OnlinePumpSdk, PUMP_SDK, feeSharingConfigPda, getBuyTokenAmountFromSolAmount } from "@pump-fun/pump-sdk";
 import {
   ComputeBudgetProgram,
   Connection,
@@ -104,10 +104,10 @@ app.get("/health", async (_request, response) => {
 
 app.get("/api/providers", async (_request, response) => {
   let stonkLive = false;
-  try { const stats = dataOf<{ config?: { apiLaunchesEnabled?: boolean } }>(await fetchJson("https://www.stonkfun.xyz/api/public/v1/stats", {}, 5_000)); stonkLive = Boolean(stats.config?.apiLaunchesEnabled); } catch { stonkLive = false; }
+  try { const stats = dataOf<{ config?: { apiLaunchesEnabled?: boolean; launchLabEnabled?: boolean } }>(await fetchJson("https://www.stonkfun.xyz/api/public/v1/stats", {}, 5_000)); stonkLive = Boolean(stats.config?.launchLabEnabled || stats.config?.apiLaunchesEnabled); } catch { stonkLive = false; }
   response.json({ providers: [
     { id: "pump", preparation: "enabled", method: "pump.fun create transaction" },
-    { id: "stonk", preparation: stonkLive ? "enabled" : "provider_unavailable", method: "StonkFun public v1" },
+    { id: "stonk", preparation: stonkLive ? "enabled" : "provider_unavailable", method: "StonkFun LaunchLab" },
     { id: "ember", preparation: "enabled", method: "Ember Meteora launch API" },
     { id: "bonk", preparation: "enabled", method: "Raydium SDK + BONK platform config" },
     { id: "bags", preparation: process.env.BAGS_API_KEY ? "enabled" : "needs_api_key", method: "Bags API v2" },
@@ -135,8 +135,23 @@ app.post("/api/metadata", upload.single("image"), async (request, response) => {
 app.post("/api/prepare/pump", async (request, response) => {
   try {
     const input = launchInput.parse(request.body);
-    const data = await fetchJson("https://fun-block.pump.fun/agents/create-coin", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ user: input.wallet, feePayer: input.wallet, creator: input.wallet, name: input.name, symbol: input.symbol, uri: input.metadataUri, solLamports: String(input.initialBuyLamports), encoding: "base64", mayhemMode: false, cashback: false, tokenizedAgent: false, frontRunningProtection: false }) });
-    response.json({ transaction: data.transaction, mint: data.mintPublicKey, encoding: "base64", version: "v0", provider: "pump" });
+    const rpc = connection();
+    const user = new PublicKey(input.wallet);
+    const mint = Keypair.generate();
+    const instructions: TransactionInstruction[] = [ComputeBudgetProgram.setComputeUnitLimit({ units: input.initialBuyLamports > 0 ? 500_000 : 350_000 })];
+    if (input.initialBuyLamports > 0) {
+      const online = new OnlinePumpSdk(rpc);
+      const [global, feeConfig] = await Promise.all([online.fetchGlobal(), online.fetchFeeConfig()]);
+      const solAmount = new BN(input.initialBuyLamports);
+      const amount = getBuyTokenAmountFromSolAmount({ global, feeConfig, mintSupply: null, bondingCurve: null, amount: solAmount, quoteMint: NATIVE_MINT });
+      instructions.push(...await PUMP_SDK.createV2AndBuyInstructions({ global, mint: mint.publicKey, name: input.name, symbol: input.symbol, uri: input.metadataUri, creator: user, user, amount, solAmount, mayhemMode: false }));
+    } else {
+      instructions.push(await PUMP_SDK.createV2Instruction({ mint: mint.publicKey, name: input.name, symbol: input.symbol, uri: input.metadataUri, creator: user, user, mayhemMode: false }));
+    }
+    const { blockhash } = await rpc.getLatestBlockhash("confirmed");
+    const transaction = new VersionedTransaction(new TransactionMessage({ payerKey: user, recentBlockhash: blockhash, instructions }).compileToV0Message());
+    transaction.sign([mint]);
+    response.json({ transaction: Buffer.from(transaction.serialize()).toString("base64"), mint: mint.publicKey.toBase58(), encoding: "base64", version: "v0", provider: "pump" });
   } catch (error) { response.status(422).json({ error: error instanceof Error ? error.message : "Pump preparation failed." }); }
 });
 
@@ -146,20 +161,26 @@ app.post("/api/prepare/stonk", async (request, response) => {
     if (!input.logo) return response.status(400).json({ error: "StonkFun requires the original token image." });
     const devBuy = Number(input.stonkDevBuy || 0);
     const body: Record<string, unknown> = {
-      creatorWallet: input.wallet, quoteMint: input.stonkQuote, name: input.name, symbol: input.symbol,
-      mode: input.stonkMode === "reward" ? "reward" : "standard", logo: input.logo,
+      action: "prepare", creatorWallet: input.wallet, quoteMint: input.stonkQuote, name: input.name, symbol: input.symbol,
+      logo: input.logo, description: input.description,
       website: input.website || undefined, twitter: input.twitter || undefined, telegram: input.telegram || undefined,
     };
     if (devBuy > 0) body.devBuyPercent = devBuy;
-    if (input.stonkMode === "reward" && Number(input.stonkTax)) body.transferFeeBps = Number(input.stonkTax);
-    const prepared = dataOf<{ paymentTransaction: string; signedQuote: string; payment?: unknown }>(await fetchJson("https://www.stonkfun.xyz/api/public/v1/launches/prepare", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }));
-    response.json({ kind: "stonk", transaction: prepared.paymentTransaction, signedQuote: prepared.signedQuote, payment: prepared.payment });
+    if (input.stonkMode === "reward") { body.mode = "reward"; body.rewardTaxBps = Number(input.stonkTax) || 100; }
+    const prepared = await fetchJson("https://www.stonkfun.xyz/api/launchlab-launch", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    if (!prepared.transaction || !prepared.mint) throw new Error("StonkFun LaunchLab did not return a launch transaction.");
+    response.json({ kind: "stonk", transaction: prepared.transaction, signedQuote: "stonk-launchlab", payment: { feeSol: prepared.feeSol || 0 }, mint: prepared.mint, poolId: prepared.poolId });
   } catch (error) { response.status(422).json({ error: error instanceof Error ? error.message : "StonkFun preparation failed." }); }
 });
 
 app.post("/api/submit/stonk", async (request, response) => {
   try {
     const body = z.object({ signedQuote: z.string().min(10), signedTransaction: z.string().min(20), logo: z.string().min(20) }).parse(request.body);
+    if (body.signedQuote === "stonk-launchlab") {
+      const submitted = await fetchJson("https://www.stonkfun.xyz/api/launchlab-launch", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "submit", signedTransaction: body.signedTransaction }) });
+      const result = dataOf<Record<string, unknown>>(submitted);
+      return response.json({ ...result, status: "completed", paymentSignature: result.signature || result.transactionSignature });
+    }
     const submitted = dataOf<Record<string, unknown>>(await fetchJson("https://www.stonkfun.xyz/api/public/v1/launches/submit", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }));
     response.json(submitted);
   } catch (error) {
@@ -237,35 +258,28 @@ app.post("/api/prepare/bonk", async (request, response) => {
   try {
     const input = launchInput.parse(request.body);
     if (!input.imageUri) return response.status(400).json({ error: "BONK.fun requires an uploaded token image." });
-    const configPayload = dataOf<{ data: RayConfig[] }>(await fetchJson("https://launch-mint-v1.raydium.io/main/configs"));
-    const row = configPayload.data.find((item) => item.key.mintB === "So11111111111111111111111111111111111111112" && item.key.curveType === 0);
-    if (!row) throw new Error("BONK's current SOL LaunchLab configuration is unavailable.");
-    const configInfo: ReturnType<typeof LaunchpadConfig.decode> = {
-      index: row.key.index, mintB: new PublicKey(row.key.mintB), tradeFeeRate: new BN(row.key.tradeFeeRate), epoch: new BN(row.key.epoch), curveType: row.key.curveType,
-      migrateFee: new BN(row.key.migrateFee), maxShareFeeRate: new BN(row.key.maxShareFeeRate), minSupplyA: new BN(row.key.minSupplyA), maxLockRate: new BN(row.key.maxLockRate), minSellRateA: new BN(row.key.minSellRateA), minMigrateRateA: new BN(row.key.minMigrateRateA), minFundRaisingB: new BN(row.key.minFundRaisingB),
-      protocolFeeOwner: new PublicKey(row.key.protocolFeeOwner), migrateFeeOwner: new PublicKey(row.key.migrateFeeOwner), migrateToAmmWallet: new PublicKey(row.key.migrateToAmmWallet), migrateToCpmmWallet: new PublicKey(row.key.migrateToCpmmWallet),
-    };
-    const imageResponse = await fetch(input.imageUri, { signal: AbortSignal.timeout(30_000) });
-    if (!imageResponse.ok) throw new Error("Could not retrieve the uploaded token image for BONK.fun.");
-    const image = await imageResponse.blob();
-    const mintForm = new FormData();
-    const mintFields = { wallet: input.wallet, name: input.name, symbol: input.symbol, website: input.website || "", twitter: input.twitter || "", telegram: input.telegram || "", configId: row.key.pubKey, decimals: "6", supply: row.defaultParams.supplyInit, totalSellA: row.defaultParams.totalSellA, totalFundRaisingB: row.defaultParams.totalFundRaisingB, totalLockedAmount: "0", cliffPeriod: "0", unlockPeriod: "0", platformId: "8pCtbn9iatQ8493mDQax4xfEUjhoVBpUWYVQoRU18333", migrateType: "amm", description: input.description };
-    Object.entries(mintFields).forEach(([key, value]) => mintForm.append(key, value));
-    mintForm.append("file", image, "token-image.png");
-    const mintPayload = dataOf<{ mint: string; metadataLink: string }>(await fetchJson("https://launch-mint-v1.raydium.io/create/get-random-mint", { method: "POST", headers: { "ray-token": `token-${Date.now()}` }, body: mintForm }));
-    const rpc = connection();
-    const raydium = await Raydium.load({ owner: new PublicKey(input.wallet), connection: rpc, cluster: "mainnet", disableFeatureCheck: true, disableLoadToken: true, blockhashCommitment: "confirmed" });
-    const created = await raydium.launchpad.createLaunchpad({
-      programId: LAUNCHPAD_PROGRAM, mintA: new PublicKey(mintPayload.mint), decimals: 6, name: input.name, symbol: input.symbol, uri: mintPayload.metadataLink,
-      configId: new PublicKey(row.key.pubKey), configInfo, migrateType: "amm", mintBDecimals: row.mintInfoB.decimals, mintBProgram: new PublicKey(row.mintInfoB.programId),
-      platformId: new PublicKey("8pCtbn9iatQ8493mDQax4xfEUjhoVBpUWYVQoRU18333"), txVersion: TxVersion.V0, slippage: new BN(100), buyAmount: new BN(input.initialBuyLamports), createOnly: input.initialBuyLamports === 0,
-      supply: new BN(row.defaultParams.supplyInit), totalSellA: new BN(row.defaultParams.totalSellA), totalFundRaisingB: new BN(row.defaultParams.totalFundRaisingB), totalLockedAmount: new BN(0), cliffPeriod: new BN(0), unlockPeriod: new BN(0),
+    const created = await fetchJson("https://launch.letsbonk.fun/launchpad/createMint", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        owner: input.wallet,
+        useBonkMintAddress: false,
+        programId: LAUNCHPAD_PROGRAM.toBase58(),
+        decimals: 6,
+        name: input.name,
+        symbol: input.symbol,
+        uri: input.metadataUri,
+        migrateType: "amm",
+        platformId: "82NMHVCKwehXgbXMyzL41mvv3sdkypaMCtTxvJ4CtTzm",
+        slippage: 100,
+        buyAmount: String(input.initialBuyLamports || 1),
+        createOnly: input.initialBuyLamports === 0,
+        supply: "1000000000000000",
+        totalSellA: "793100000000000",
+      }),
     });
-    const mintSignedPayload = await fetchJson("https://launch-mint-v1.raydium.io/create/sendTransaction", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ txs: created.transactions.map((transaction) => txToBase64(transaction)) }) });
-    const signedData = dataOf<{ tx?: string; txs?: string[] }>(mintSignedPayload);
-    const txs = signedData.txs || (signedData.tx ? [signedData.tx] : []);
-    if (!txs.length) throw new Error("BONK.fun did not return a mint-signed transaction.");
-    response.json({ mint: mintPayload.mint, transactions: txs.map((transaction, index) => ({ transaction, encoding: "base64", version: "v0", label: index ? `BONK transaction ${index + 1}` : "Create BONK.fun token" })) });
+    if (!created.mint || !created.transaction) throw new Error("BONK.fun did not return a mint-signed transaction.");
+    response.json({ mint: created.mint, poolId: created.poolId, transaction: created.transaction, encoding: "base64", version: "v0", provider: "bonk" });
   } catch (error) { response.status(422).json({ error: error instanceof Error ? error.message : "BONK.fun preparation failed." }); }
 });
 
