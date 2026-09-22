@@ -253,6 +253,23 @@ app.post("/api/submit/ember", async (request, response) => {
   } catch (error) { response.status(422).json({ error: error instanceof Error ? error.message : "Ember submission failed." }); }
 });
 
+app.post("/api/submit/solana", async (request, response) => {
+  try {
+    const body = z.object({ signedTransaction: z.string().min(20).max(3_000_000) }).parse(request.body);
+    const rawTransaction = Buffer.from(body.signedTransaction, "base64");
+    if (!rawTransaction.length) return response.status(400).json({ error: "The signed Solana transaction is empty." });
+    const rpc = connection();
+    const signature = await rpc.sendRawTransaction(rawTransaction, { skipPreflight: false, maxRetries: 3 });
+    const confirmation = await rpc.confirmTransaction(signature, "confirmed");
+    if (confirmation.value.err) throw new Error(`Solana rejected ${signature.slice(0, 8)}…`);
+    console.log("[solana-submit] confirmed", { signature });
+    response.json({ signature, status: "confirmed" });
+  } catch (error) {
+    console.error("[solana-submit] failed", { error: error instanceof Error ? error.message : String(error) });
+    response.status(422).json({ error: error instanceof Error ? error.message : "Solana submission failed." });
+  }
+});
+
 type RayConfig = { key: { pubKey: string; index: number; mintB: string; tradeFeeRate: string; epoch: string; curveType: number; migrateFee: string; maxShareFeeRate: string; minSupplyA: string; maxLockRate: string; minSellRateA: string; minMigrateRateA: string; minFundRaisingB: string; protocolFeeOwner: string; migrateFeeOwner: string; migrateToAmmWallet: string; migrateToCpmmWallet: string }; mintInfoB: { decimals: number; programId: string }; defaultParams: { supplyInit: string; totalSellA: string; totalFundRaisingB: string } };
 
 app.post("/api/prepare/bonk", async (request, response) => {
