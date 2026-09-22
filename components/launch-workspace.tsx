@@ -1,7 +1,7 @@
 "use client";
 
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton, useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { Transaction, VersionedTransaction } from "@solana/web3.js";
 import bs58 from "bs58";
@@ -57,7 +57,6 @@ async function fileDataUrl(file: File) {
 }
 
 export function LaunchWorkspace() {
-  const { connection } = useConnection();
   const wallet = useWallet();
   const { setVisible: showWallet } = useWalletModal();
   const [mode, setMode] = useState<"single" | "multi">("single");
@@ -147,13 +146,17 @@ export function LaunchWorkspace() {
   }
 
   async function confirmSigned(serialized: string) {
-    const signature = await connection.sendRawTransaction(fromBase64(serialized), { skipPreflight: false, maxRetries: 3 });
-    const confirmation = await connection.confirmTransaction(signature, "confirmed");
-    if (confirmation.value.err) throw new Error(`Solana rejected ${signature.slice(0, 8)}…`);
-    return signature;
+    const response = await fetch(`${apiUrl}/api/submit/solana`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ signedTransaction: serialized }),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.signature) throw new Error(result.error || "Solana could not broadcast this transaction.");
+    return result.signature as string;
   }
 
-  async function runRoute(provider: ProviderId, metadata: Metadata) {
+  async function runRoute(provider: ProviderId, metadata: Metadata, bagsWindow?: Window | null) {
     if (!wallet.publicKey) throw new Error("Connect a Solana wallet first.");
     if (["stonk", "ember", "bonk"].includes(provider) && !image) throw new Error(`${providerById[provider].name} requires the original image file.`);
     setRoute(provider, { state: "preparing", message: "Preparing with the official launch route" });
@@ -166,7 +169,8 @@ export function LaunchWorkspace() {
     if (!response.ok) throw new Error(prepared.error || "The provider could not prepare this launch.");
 
     if (prepared.kind === "bags-intent") {
-      window.open(prepared.launchUrl, "_blank", "noopener,noreferrer");
+      if (bagsWindow && !bagsWindow.closed) bagsWindow.location.replace(prepared.launchUrl);
+      else window.open(prepared.launchUrl, "_blank", "noopener,noreferrer");
       setRoute(provider, { state: "handoff", message: "Prefilled on Bags · review and launch there", url: prepared.launchUrl });
       return;
     }
@@ -263,13 +267,26 @@ export function LaunchWorkspace() {
     if (!wallet.connected) return showWallet(true);
     if (!form.name.trim() || !form.symbol.trim() || !form.description.trim()) return alert("Add the token name, ticker and description.");
     if (!ids.length) return alert("Select at least one launchpad.");
+    const bagsWindow = ids.includes("bags") ? window.open("about:blank", "anything-bags-launch") : null;
+    if (bagsWindow) {
+      bagsWindow.opener = null;
+      bagsWindow.document.title = "Preparing Bags launch";
+      bagsWindow.document.body.textContent = "Preparing your prefilled Bags launch…";
+      bagsWindow.document.body.style.cssText = "font:600 18px system-ui;padding:40px;background:#050505;color:#fff";
+    }
     let metadata: Metadata = { metadataUri: "provider-native", imageUri: "" };
     if (ids.some((id) => ["pump", "bonk", "otc", "bags", "raydium", "meteora"].includes(id))) {
-      try { metadata = await prepareMetadata(); } catch (error) { return alert(error instanceof Error ? error.message : "Metadata upload failed."); }
+      try { metadata = await prepareMetadata(); } catch (error) {
+        if (bagsWindow && !bagsWindow.closed) bagsWindow.close();
+        return alert(error instanceof Error ? error.message : "Metadata upload failed.");
+      }
     }
     for (const id of ids) {
       if (results.find((item) => item.provider === id)?.state === "success") continue;
-      try { await runRoute(id, metadata); } catch (error) { setRoute(id, { state: "failed", message: error instanceof Error ? error.message : "Launch failed." }); }
+      try { await runRoute(id, metadata, id === "bags" ? bagsWindow : null); } catch (error) {
+        if (id === "bags" && bagsWindow && !bagsWindow.closed) bagsWindow.close();
+        setRoute(id, { state: "failed", message: error instanceof Error ? error.message : "Launch failed." });
+      }
     }
   }
 
