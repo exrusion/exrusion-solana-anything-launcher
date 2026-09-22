@@ -43,6 +43,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 *
 const port = Number(process.env.PORT || 8787);
 const rpcUrl = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
 const allowedOrigins = (process.env.WEB_ORIGIN || "http://localhost:3000").split(",").map((item) => item.trim());
+const bagsIntentImageHosts = new Set(["ipfs.io", "gateway.pinata.cloud", "pump.mypinata.cloud", "cf-ipfs.com", "cloudflare-ipfs.com"]);
 const emberApiBase = String(process.env.EMBER_API_BASE || "https://embercurve.fun").replace(/\/$/, "");
 const OTC_ORIGIN = "https://otcdesks.cash";
 const OTC_REWARD_WALLET = new PublicKey(process.env.OTC_REWARD_WALLET || "2k5hrzuykwyTbUe8L7UriYAQhr5hijNLgBvEB4B9pP5y");
@@ -436,7 +437,14 @@ app.post("/api/prepare/bags", async (request, response) => {
       };
       setHttpUrl("website", input.website);
       setHttpUrl("twitter", input.twitter);
-      setHttpUrl("image", input.imageUri);
+      if (input.imageUri) {
+        try {
+          const imageSource = new URL(input.imageUri);
+          if (imageSource.protocol === "https:" && bagsIntentImageHosts.has(imageSource.hostname) && imageSource.pathname.includes("/ipfs/")) {
+            launchUrl.searchParams.set("image", new URL(imageSource.pathname, "https://pump.mypinata.cloud").toString());
+          }
+        } catch { /* Bags will leave an invalid optional image empty. */ }
+      }
       return response.json({ kind: "bags-intent", provider: "bags", launchUrl: launchUrl.toString() });
     }
     const headers = { "x-api-key": process.env.BAGS_API_KEY };
