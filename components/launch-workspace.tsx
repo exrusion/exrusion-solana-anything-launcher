@@ -200,6 +200,32 @@ export function LaunchWorkspace() {
       return;
     }
 
+    if (prepared.kind === "bags") {
+      const configSignatures: string[] = [];
+      const configTransactions = Array.isArray(prepared.configTransactions) ? prepared.configTransactions : [];
+      for (let index = 0; index < configTransactions.length; index += 1) {
+        const item = configTransactions[index];
+        setRoute(provider, { state: "approval", message: `Approval ${index + 1} of ${configTransactions.length + 1} · Bags fee-share config` });
+        const { serialized } = await signPrepared(item.transaction, item.encoding || "base58", item.version || "v0");
+        setRoute(provider, { state: "confirming", message: "Confirming Bags fee-share configuration" });
+        configSignatures.push(await confirmSigned(serialized));
+      }
+      const launchResponse = await fetch(`${apiUrl}/api/prepare/bags-launch`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ tokenMint: prepared.mint, metadataUri: prepared.metadataUri, wallet: wallet.publicKey.toBase58(), initialBuyLamports: Math.round(Number(form.initialBuy || 0) * 1_000_000_000), configKey: prepared.configKey }),
+      });
+      const launch = await launchResponse.json();
+      if (!launchResponse.ok) throw new Error(launch.error || "Bags could not build the launch transaction.");
+      setRoute(provider, { state: "approval", message: `Approval ${configTransactions.length + 1} of ${configTransactions.length + 1} · Launch on Bags` });
+      const { serialized } = await signPrepared(launch.transaction, launch.encoding || "base58", launch.version || "v0");
+      setRoute(provider, { state: "confirming", message: "Confirming the Bags launch on Solana" });
+      const signature = await confirmSigned(serialized);
+      await saveLaunch(provider, prepared.mint, [...configSignatures, signature]);
+      setRoute(provider, { state: "success", message: "Live on Bags", mint: prepared.mint, signatures: [...configSignatures, signature] });
+      return;
+    }
+
     const transactions = prepared.transactions || [{ transaction: prepared.transaction, encoding: prepared.encoding || "base64", version: prepared.version || "v0", label: "Create token" }];
     const signatures: string[] = [];
     for (let index = 0; index < transactions.length; index += 1) {
@@ -232,7 +258,7 @@ export function LaunchWorkspace() {
     if (!form.name.trim() || !form.symbol.trim() || !form.description.trim()) return alert("Add the token name, ticker and description.");
     if (!ids.length) return alert("Select at least one launchpad.");
     let metadata: Metadata = { metadataUri: "provider-native", imageUri: "" };
-    if (ids.some((id) => ["pump", "bonk", "otc", "bags"].includes(id))) {
+    if (ids.some((id) => ["pump", "bonk", "otc", "bags", "raydium", "meteora"].includes(id))) {
       try { metadata = await prepareMetadata(); } catch (error) { return alert(error instanceof Error ? error.message : "Metadata upload failed."); }
     }
     for (const id of ids) {
@@ -414,7 +440,9 @@ function ProviderOptions({ id, form, update }: { id: ProviderId; form: LaunchFor
   if (id === "stonk") return <article className="option-card stonk-card"><OptionHead id={id}/><div className="option-grid"><Select label="Fee model" value={form.stonkMode} onChange={(value) => update("stonkMode", value)} options={[["standard", "Standard token"], ["reward", "Reward token"]]}/><Select label="Holder rewards tax" value={form.stonkTax} onChange={(value) => update("stonkTax", value)} options={[["0", "None"], ["100", "1%"], ["300", "3%"]]}/><Select label="Quote token" value={form.stonkQuote} onChange={(value) => update("stonkQuote", value)} options={stonkPairs.map(([value, label]) => [value, label])}/><Field label="Dev buy (% supply)" value={form.stonkDevBuy} onChange={(value) => update("stonkDevBuy", value)} placeholder="0"/></div><p>Atomic StonkFun launch: payment, fixed-supply mint, first trade and LaunchLab pool land together or not at all.</p></article>;
   if (id === "ember") return <article className="option-card ember-card"><OptionHead id={id}/><div className="option-grid"><Select label="Pair" value={form.emberQuote} onChange={(value) => update("emberQuote", value)} options={emberPairs.map(([value, label]) => [value, label])}/><Select label="Trade tax" value={form.emberFee} onChange={(value) => update("emberFee", value)} options={[["100", "1%"], ["200", "2%"], ["300", "3%"]]}/><Select label="Graduation" value={form.emberGraduate} onChange={(value) => update("emberGraduate", value)} options={[["25000", "$25,000"], ["35000", "$35,000"], ["40000", "$40,000"]]}/><Select label="Fee destination" value={form.emberMode} onChange={(value) => update("emberMode", value)} options={[["holders", "Holder rewards"], ["diamond", "Diamond Hands"], ["vault", "Milestone Vault"], ["burn", "Buyback & burn"], ["keep", "Keep it"]]}/><Select label="Payout currency" value={form.emberPayout} onChange={(value) => update("emberPayout", value)} options={[["quote", "Selected pair"], ["sol", "SOL"], ["ember", "EMBER"]]}/><Select label="Sniper Shield" value={form.emberShield} onChange={(value) => update("emberShield", value)} options={[["off", "Off"], ["on", "On"]]}/><Select label="Volatility Dividend" value={form.emberVolatility} onChange={(value) => update("emberVolatility", value)} options={[["off", "Off"], ["on", "On"]]}/><Select label="Graduation airdrop" value={form.emberAirdrop} onChange={(value) => update("emberAirdrop", value)} options={[["off", "Off"], ["on", "5%"]]}/></div><p>Launches on Ember’s Meteora curve. The selected fee module and economics are validated by Ember before your wallet signs.</p></article>;
   if (id === "otc") return <article className="option-card otc-card"><OptionHead id={id}/><div className="option-grid"><Select label="Launch on" value={form.otcVenue} onChange={(value) => update("otcVenue", value)} options={[["pump", "Pump"], ["meteora", "Meteora (verification pending)"]]}/><Select label="Paired with" value={form.otcPair} onChange={(value) => { update("otcPair", value); update("otcPairSymbol", otcPairs.find(([mint]) => mint === value)?.[1] || "CUSTOM"); }} options={otcPairs.map(([value, symbol, name]) => [value, `${symbol} · ${name}`])}/><Select label="Your first buy" value="0" onChange={() => update("initialBuy", "0")} options={[["0", "None · adapter verification"]]}/></div><div className="split-bar"><span style={{width:"67.5%"}}>Holders 67.5%</span><span style={{width:"10%"}}>Desks</span><span style={{width:"22.5%"}}>Other</span></div><p>Two wallet confirmations: create the paired Pump V2 coin, then lock its creator-fee routing to OTC.</p></article>;
-  if (id === "bags") return <article className="option-card bags-card"><OptionHead id={id}/><div className="option-grid"><Field label="Bags config key" value={form.bagsConfigKey} onChange={(value) => update("bagsConfigKey", value)} placeholder="Launch config public key"/><Field label="First buy (SOL)" value={form.initialBuy} onChange={(value) => update("initialBuy", value)} placeholder="0"/></div><p>The backend needs a Bags developer key; the key stays server-side and your wallet signs the returned transaction.</p></article>;
+  if (id === "bags") return <article className="option-card bags-card"><OptionHead id={id}/><div className="option-grid"><Field label="First buy (SOL)" value={form.initialBuy} onChange={(value) => update("initialBuy", value)} placeholder="0"/></div><p>Anything creates a Bags v2 fee-share configuration automatically with 100% of the creator allocation assigned to your wallet, then asks you to sign the launch.</p></article>;
+  if (id === "raydium") return <article className="option-card raydium-card"><OptionHead id={id}/><div className="option-grid"><Field label="First buy (SOL)" value={form.initialBuy} onChange={(value) => update("initialBuy", value)} placeholder="0"/><Select label="Graduation" value="amm" onChange={() => undefined} options={[["amm", "Raydium AMM"]]}/></div><p>Creates a standard SOL LaunchLab curve through Raydium SDK v2. Your wallet signs the mint creation and optional first buy.</p></article>;
+  if (id === "meteora") return <article className="option-card meteora-card"><OptionHead id={id}/><div className="option-grid"><Select label="Trading fee" value="100" onChange={() => undefined} options={[["100", "1%"]]}/><Select label="Graduation" value="10" onChange={() => undefined} options={[["10", "10 SOL · DAMM v2"]]}/></div><p>Creates a new Meteora DBC configuration and token pool in one wallet-signed transaction. Creator LP receives 90%; 10% remains permanently locked.</p></article>;
   return <article className={`option-card ${id}-card gated-card`}><OptionHead id={id}/><p>This adapter is present but intentionally disabled until the current SDK-built transaction passes mainnet simulation and a funded confirmation test.</p></article>;
 }
 

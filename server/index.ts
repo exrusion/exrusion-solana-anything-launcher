@@ -8,6 +8,7 @@ import { z } from "zod";
 import BN from "bn.js";
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
+  NATIVE_MINT,
   TOKEN_2022_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
   createAssociatedTokenAccountIdempotentInstruction,
@@ -18,14 +19,20 @@ import {
   LaunchpadConfig,
   Raydium,
   TxVersion,
+  getPdaLaunchpadConfigId,
   txToBase64,
 } from "@raydium-io/raydium-sdk-v2";
+import {
+  DynamicBondingCurveClient,
+  buildCurve,
+} from "@meteora-ag/dynamic-bonding-curve-sdk";
 import { PUMP_SDK, feeSharingConfigPda } from "@pump-fun/pump-sdk";
 import {
   ComputeBudgetProgram,
   Connection,
   Keypair,
   PublicKey,
+  Transaction,
   TransactionInstruction,
   TransactionMessage,
   VersionedTransaction,
@@ -92,7 +99,7 @@ function imageBlob(dataUrl: string) {
 app.get("/health", async (_request, response) => {
   let rpc = false;
   try { await connection().getLatestBlockhash("confirmed"); rpc = true; } catch { rpc = false; }
-  response.status(rpc ? 200 : 503).json({ ok: rpc, network: "solana-mainnet", feeBps: 0, storage: db ? "postgres" : "memory", adapters: ["pump", "stonk", "ember", "bonk", "bags", "otc"] });
+  response.status(rpc ? 200 : 503).json({ ok: rpc, network: "solana-mainnet", feeBps: 0, storage: db ? "postgres" : "memory", adapters: ["pump", "stonk", "ember", "bonk", "bags", "otc", "raydium", "meteora"] });
 });
 
 app.get("/api/providers", async (_request, response) => {
@@ -105,8 +112,8 @@ app.get("/api/providers", async (_request, response) => {
     { id: "bonk", preparation: "enabled", method: "Raydium SDK + BONK platform config" },
     { id: "bags", preparation: process.env.BAGS_API_KEY ? "enabled" : "needs_api_key", method: "Bags API v2" },
     { id: "otc", preparation: "enabled", method: "Pump SDK V2 + OTC fee assignment" },
-    { id: "raydium", preparation: "verification_required", method: "Raydium SDK v2" },
-    { id: "meteora", preparation: "verification_required", method: "Meteora DBC SDK" },
+    { id: "raydium", preparation: "enabled", method: "Raydium LaunchLab SDK v2" },
+    { id: "meteora", preparation: "enabled", method: "Meteora DBC SDK" },
   ] });
 });
 
@@ -262,6 +269,99 @@ app.post("/api/prepare/bonk", async (request, response) => {
   } catch (error) { response.status(422).json({ error: error instanceof Error ? error.message : "BONK.fun preparation failed." }); }
 });
 
+app.post("/api/prepare/raydium", async (request, response) => {
+  try {
+    const input = launchInput.parse(request.body);
+    const rpc = connection();
+    const owner = new PublicKey(input.wallet);
+    const mint = Keypair.generate();
+    const configId = getPdaLaunchpadConfigId(LAUNCHPAD_PROGRAM, NATIVE_MINT, 0, 0).publicKey;
+    const configAccount = await rpc.getAccountInfo(configId, "confirmed");
+    if (!configAccount) throw new Error("Raydium's main SOL LaunchLab configuration is unavailable.");
+    const configInfo = LaunchpadConfig.decode(configAccount.data);
+    const configPayload = dataOf<{ data: RayConfig[] }>(await fetchJson("https://launch-mint-v1.raydium.io/main/configs"));
+    const apiConfig = configPayload.data.find((item) => item.key.pubKey === configId.toBase58());
+    if (!apiConfig) throw new Error("Raydium's LaunchLab API did not return its main SOL configuration.");
+    const raydium = await Raydium.load({ owner, connection: rpc, cluster: "mainnet", disableFeatureCheck: true, disableLoadToken: true, blockhashCommitment: "confirmed" });
+    (raydium.api as unknown as { fetchLaunchConfigs: () => Promise<unknown[]> }).fetchLaunchConfigs = async () => [apiConfig];
+    const created = await raydium.launchpad.createLaunchpad({
+      programId: LAUNCHPAD_PROGRAM,
+      mintA: mint.publicKey,
+      decimals: 6,
+      name: input.name,
+      symbol: input.symbol,
+      uri: input.metadataUri,
+      configId,
+      configInfo,
+      migrateType: "amm",
+      mintBDecimals: 9,
+      mintBProgram: TOKEN_PROGRAM_ID,
+      txVersion: TxVersion.V0,
+      slippage: new BN(100),
+      buyAmount: new BN(input.initialBuyLamports),
+      createOnly: input.initialBuyLamports === 0,
+      extraSigners: [mint],
+    });
+    const transactions = created.transactions.map((transaction, index) => ({
+      transaction: txToBase64(transaction),
+      encoding: "base64",
+      version: "v0",
+      label: index ? `Raydium transaction ${index + 1}` : "Create Raydium LaunchLab token",
+    }));
+    if (!transactions.length) throw new Error("Raydium did not build a launch transaction.");
+    response.json({ mint: mint.publicKey.toBase58(), transactions, provider: "raydium" });
+  } catch (error) { response.status(422).json({ error: error instanceof Error ? error.message : "Raydium preparation failed." }); }
+});
+
+app.post("/api/prepare/meteora", async (request, response) => {
+  try {
+    const input = launchInput.parse(request.body);
+    const rpc = connection();
+    const payer = new PublicKey(input.wallet);
+    const config = Keypair.generate();
+    const baseMint = Keypair.generate();
+    const curve = buildCurve({
+      percentageSupplyOnMigration: 20,
+      migrationQuoteThreshold: 10,
+      token: { totalTokenSupply: 1_000_000_000, tokenBaseDecimal: 6, tokenQuoteDecimal: 9, tokenType: 0, tokenAuthorityOption: 1, leftover: 0 },
+      fee: {
+        baseFeeParams: { baseFeeMode: 0, feeSchedulerParam: { startingFeeBps: 100, endingFeeBps: 100, numberOfPeriod: 0, totalDuration: 0 } },
+        dynamicFeeEnabled: true,
+        collectFeeMode: 0,
+        creatorTradingFeePercentage: 50,
+        poolCreationFee: 0,
+        enableFirstSwapWithMinFee: false,
+      },
+      migration: { migrationOption: 1, migrationFeeOption: 3, migrationFee: { feePercentage: 0, creatorFeePercentage: 0 } },
+      liquidityDistribution: { partnerLiquidityPercentage: 0, creatorLiquidityPercentage: 90, partnerPermanentLockedLiquidityPercentage: 0, creatorPermanentLockedLiquidityPercentage: 10 },
+      lockedVesting: { totalLockedVestingAmount: 0, numberOfVestingPeriod: 0, cliffUnlockAmount: 0, totalVestingDuration: 0, cliffDurationFromMigrationTime: 0 },
+      activationType: 1,
+    });
+    const dbc = DynamicBondingCurveClient.create(rpc, "confirmed");
+    const transaction = await dbc.partner.createConfigAndPool({
+      ...curve,
+      config: config.publicKey,
+      quoteMint: NATIVE_MINT,
+      feeClaimer: payer,
+      leftoverReceiver: payer,
+      payer,
+      preCreatePoolParam: { name: input.name, symbol: input.symbol, uri: input.metadataUri, poolCreator: payer, baseMint: baseMint.publicKey },
+    });
+    const { blockhash } = await rpc.getLatestBlockhash("confirmed");
+    transaction.feePayer = payer;
+    transaction.recentBlockhash = blockhash;
+    transaction.instructions.unshift(ComputeBudgetProgram.setComputeUnitLimit({ units: 1_200_000 }));
+    transaction.partialSign(config, baseMint);
+    response.json({
+      mint: baseMint.publicKey.toBase58(),
+      transaction: transaction.serialize({ requireAllSignatures: false, verifySignatures: false }).toString("base64"),
+      encoding: "base64",
+      version: "legacy",
+      provider: "meteora",
+    });
+  } catch (error) { response.status(422).json({ error: error instanceof Error ? error.message : "Meteora preparation failed." }); }
+});
+
 function creatorVaults(sharingConfig: PublicKey) {
   return [PublicKey.findProgramAddressSync([Buffer.from("creator-vault"), sharingConfig.toBuffer()], PUMP_PROGRAM_ID)[0], PublicKey.findProgramAddressSync([Buffer.from("creator_vault"), sharingConfig.toBuffer()], PUMP_AMM_PROGRAM_ID)[0]];
 }
@@ -308,16 +408,43 @@ app.post("/api/prepare/bags", async (request, response) => {
   try {
     if (!process.env.BAGS_API_KEY) return response.status(503).json({ error: "Bags needs BAGS_API_KEY on Railway." });
     const input = launchInput.parse(request.body);
-    if (!input.bagsConfigKey) return response.status(400).json({ error: "A Bags config key is required." });
     const headers = { "x-api-key": process.env.BAGS_API_KEY };
     const infoForm = new FormData();
     Object.entries({ name: input.name, symbol: input.symbol, description: input.description, metadataUrl: input.metadataUri, website: input.website || "", twitter: input.twitter || "", telegram: input.telegram || "" }).forEach(([key, value]) => infoForm.append(key, value));
     const info = await fetchJson("https://public-api-v2.bags.fm/api/v1/token-launch/create-token-info", { method: "POST", headers, body: infoForm });
     const details = (info.response || info.data || {}) as { tokenMint?: string; tokenMetadata?: string; tokenLaunch?: { uri?: string } };
     if (!details.tokenMint) throw new Error("Bags did not return a token mint.");
-    const launch = await fetchJson("https://public-api-v2.bags.fm/api/v1/token-launch/create-launch-transaction", { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify({ ipfs: details.tokenMetadata || details.tokenLaunch?.uri || input.metadataUri, tokenMint: details.tokenMint, wallet: input.wallet, initialBuyLamports: input.initialBuyLamports, configKey: input.bagsConfigKey }) });
-    response.json({ transaction: launch.response || launch.data, mint: details.tokenMint, encoding: "base58", version: "v0", provider: "bags" });
+    const configPayload = await fetchJson("https://public-api-v2.bags.fm/api/v1/fee-share/config", {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ payer: input.wallet, baseMint: details.tokenMint, claimersArray: [input.wallet], basisPointsArray: [10_000] }),
+    });
+    const config = dataOf<{ meteoraConfigKey?: string; transactions?: Array<{ transaction: string }>; bundles?: Array<Array<{ transaction: string }>> }>(configPayload);
+    if (!config.meteoraConfigKey) throw new Error("Bags did not return a fee-share configuration.");
+    const configTransactions = [...(config.transactions || []), ...(config.bundles || []).flat()].map((item, index) => ({ transaction: item.transaction, encoding: "base58", version: "v0", label: `Create Bags fee-share config ${index + 1}` }));
+    response.json({
+      kind: "bags",
+      mint: details.tokenMint,
+      metadataUri: details.tokenMetadata || details.tokenLaunch?.uri || input.metadataUri,
+      configKey: config.meteoraConfigKey,
+      configTransactions,
+    });
   } catch (error) { response.status(422).json({ error: error instanceof Error ? error.message : "Bags preparation failed." }); }
+});
+
+app.post("/api/prepare/bags-launch", async (request, response) => {
+  try {
+    if (!process.env.BAGS_API_KEY) return response.status(503).json({ error: "Bags needs BAGS_API_KEY on Railway." });
+    const input = z.object({ tokenMint: z.string().min(32), metadataUri: z.string().min(1), wallet: z.string().min(32), initialBuyLamports: z.number().int().nonnegative(), configKey: z.string().min(32) }).parse(request.body);
+    const launch = await fetchJson("https://public-api-v2.bags.fm/api/v1/token-launch/create-launch-transaction", {
+      method: "POST",
+      headers: { "x-api-key": process.env.BAGS_API_KEY, "content-type": "application/json" },
+      body: JSON.stringify({ ipfs: input.metadataUri, tokenMint: input.tokenMint, wallet: input.wallet, initialBuyLamports: input.initialBuyLamports, configKey: input.configKey }),
+    });
+    const transaction = String(launch.response || launch.data || "");
+    if (!transaction) throw new Error("Bags did not return a launch transaction.");
+    response.json({ transaction, mint: input.tokenMint, encoding: "base58", version: "v0", provider: "bags" });
+  } catch (error) { response.status(422).json({ error: error instanceof Error ? error.message : "Bags launch preparation failed." }); }
 });
 
 app.post("/api/prepare/:provider", (request, response) => response.status(503).json({ error: `${request.params.provider} is intentionally gated until its current official SDK route passes mainnet simulation and confirmation.` }));
