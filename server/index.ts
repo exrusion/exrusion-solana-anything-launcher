@@ -110,7 +110,7 @@ app.get("/api/providers", async (_request, response) => {
     { id: "stonk", preparation: stonkLive ? "enabled" : "provider_unavailable", method: "StonkFun LaunchLab" },
     { id: "ember", preparation: "enabled", method: "Ember Meteora launch API" },
     { id: "bonk", preparation: "enabled", method: "Raydium SDK + BONK platform config" },
-    { id: "bags", preparation: process.env.BAGS_API_KEY ? "enabled" : "needs_api_key", method: "Bags API v2" },
+    { id: "bags", preparation: "enabled", method: process.env.BAGS_API_KEY ? "Bags API v2" : "Official Bags launch intent" },
     { id: "otc", preparation: "enabled", method: "Pump SDK V2 + OTC fee assignment" },
     { id: "raydium", preparation: "enabled", method: "Raydium LaunchLab SDK v2" },
     { id: "meteora", preparation: "enabled", method: "Meteora DBC SDK" },
@@ -420,8 +420,25 @@ app.post("/api/finalize/otc", async (request, response) => {
 
 app.post("/api/prepare/bags", async (request, response) => {
   try {
-    if (!process.env.BAGS_API_KEY) return response.status(503).json({ error: "Bags needs BAGS_API_KEY on Railway." });
     const input = launchInput.parse(request.body);
+    if (!process.env.BAGS_API_KEY) {
+      const launchUrl = new URL("https://bags.fm/launch");
+      launchUrl.searchParams.set("intent", "true");
+      launchUrl.searchParams.set("name", input.name.slice(0, 32));
+      launchUrl.searchParams.set("ticker", input.symbol.replace(/[^a-zA-Z0-9]/g, "").slice(0, 10).toUpperCase());
+      launchUrl.searchParams.set("description", input.description);
+      const setHttpUrl = (key: string, value?: string) => {
+        if (!value) return;
+        try {
+          const parsed = new URL(value);
+          if (parsed.protocol === "https:" || parsed.protocol === "http:") launchUrl.searchParams.set(key, parsed.toString());
+        } catch { /* Bags will leave invalid optional links empty. */ }
+      };
+      setHttpUrl("website", input.website);
+      setHttpUrl("twitter", input.twitter);
+      setHttpUrl("image", input.imageUri);
+      return response.json({ kind: "bags-intent", provider: "bags", launchUrl: launchUrl.toString() });
+    }
     const headers = { "x-api-key": process.env.BAGS_API_KEY };
     const infoForm = new FormData();
     Object.entries({ name: input.name, symbol: input.symbol, description: input.description, metadataUrl: input.metadataUri, website: input.website || "", twitter: input.twitter || "", telegram: input.telegram || "" }).forEach(([key, value]) => infoForm.append(key, value));

@@ -68,6 +68,7 @@ button,input,textarea,select{font:inherit}
 .launch-button{width:calc(100% - 10px);margin:0 5px 5px;min-height:56px;border-radius:13px;background:#15313c;color:#fff}
 .launch-button:hover:not(:disabled){background:#111;color:#fff}
 .route-results{margin-top:14px;border-radius:18px;border-color:#e1e3e5;box-shadow:0 12px 35px #1a1d200e}
+.route-row.handoff>svg{color:#c04d91}
 
 .launched-section{margin-top:72px;scroll-margin-top:92px}
 .launched-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:34px;margin:0 2px 24px}

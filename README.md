@@ -8,7 +8,7 @@ A zero-router-fee Solana launch workspace that reuses one token form across inde
 - StonkFun — public prepare/sign/submit API
 - Ember — provider-native metadata plus Meteora curve prepare/sign/submit flow
 - BONK.fun — Raydium LaunchLab SDK and BONK platform configuration
-- Bags — complete API v2 metadata, automatic fee-share config and launch flow (requires `BAGS_API_KEY`)
+- Bags — official prefilled launch-intent flow, with API v2 transaction building used automatically when `BAGS_API_KEY` is available
 - OTC — wallet-signed Pump V2 custom-quote launch plus OTC fee routing
 - Raydium — official SDK v2 LaunchLab transaction builder
 - Meteora — official DBC SDK config-and-pool transaction builder
