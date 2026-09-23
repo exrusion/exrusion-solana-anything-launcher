@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ArrowRight, Check, CheckCircle2, ExternalLink, Pause, Play, RotateCcw, ShieldCheck, WalletCards, Zap } from "lucide-react";
@@ -13,29 +14,29 @@ const stages = [
 ] as const;
 
 const launchpads = [
-  { id: "pump", name: "Pump.fun", method: "Official create transaction", mark: "P", color: "#4de58a", dark: "#082b18" },
-  { id: "stonk", name: "StonkFun", method: "Public launch API", mark: "S", color: "#69b8d8", dark: "#15313c" },
-  { id: "ember", name: "Ember", method: "Meteora curve + fees", mark: "🔥", color: "#ff825c", dark: "#351b14" },
-  { id: "bonk", name: "BONK.fun", method: "Raydium LaunchLab", mark: "B!", color: "#ffd83d", dark: "#211a00" },
-  { id: "bags", name: "Bags", method: "Official Bags handoff", mark: "B", color: "#ef77bc", dark: "#291020" },
-  { id: "otc", name: "OTC", method: "Pump V2 adapter", mark: "OTC", color: "#d7ff67", dark: "#112015" },
-  { id: "raydium", name: "Raydium", method: "LaunchLab SDK", mark: "R", color: "#978cff", dark: "#17102e" },
-  { id: "meteora", name: "Meteora", method: "DBC SDK", mark: "M", color: "#ffad56", dark: "#2b1606" },
+  { id: "pump", name: "Pump.fun", method: "Official create transaction", mark: "P", logo: "https://pump.fun/pump-logomark.svg", color: "#4de58a", dark: "#082b18" },
+  { id: "stonk", name: "StonkFun", method: "Public launch API", mark: "S", logo: "https://www.stonkfun.xyz/stonk-mark.svg", color: "#69b8d8", dark: "#15313c" },
+  { id: "ember", name: "Ember", method: "Meteora curve + fees", mark: "🔥", logo: "https://embercurve.fun/apple-touch-icon.png", color: "#ff825c", dark: "#351b14" },
+  { id: "bonk", name: "BONK.fun", method: "Raydium LaunchLab", mark: "B!", logo: "https://www.bonk.fun/logos/bonk_fun.png", color: "#ffd83d", dark: "#211a00" },
+  { id: "bags", name: "Bags", method: "Official Bags handoff", mark: "B", logo: "https://bags.fm/icon.png?e952db43040dbe33", color: "#ef77bc", dark: "#291020" },
+  { id: "otc", name: "OTC", method: "Pump V2 adapter", mark: "OTC", logo: "https://otcdesks.cash/otc-icon.svg", color: "#d7ff67", dark: "#112015" },
+  { id: "raydium", name: "Raydium", method: "LaunchLab SDK", mark: "R", logo: "https://raydium.io/favicon.ico", color: "#978cff", dark: "#17102e" },
+  { id: "meteora", name: "Meteora", method: "DBC SDK", mark: "M", logo: "https://launch.meteora.ag/favicon.ico", color: "#ffad56", dark: "#2b1606" },
 ] as const;
 
 const resultMints = ["4nyTh...x8Qp", "8Ra1L...kT2m", "B0nkF...9sVm", "Mete0...dBc7"] as const;
 
 function ProviderMark({ provider, compact = false }: { provider: (typeof launchpads)[number]; compact?: boolean }) {
-  return <span className={`${styles.providerMark} ${compact ? styles.compactMark : ""}`} style={{ background: provider.color, color: provider.dark }} aria-hidden="true">{provider.mark}</span>;
+  return <span className={`${styles.providerMark} ${compact ? styles.compactMark : ""}`} style={{ "--mark-color": provider.color, color: provider.dark } as React.CSSProperties} aria-hidden="true"><span className={styles.providerFallback}>{provider.mark}</span><Image src={provider.logo} alt="" width={38} height={38} unoptimized onError={(event) => { event.currentTarget.style.display = "none"; }}/></span>;
 }
 
 function TokenArtwork() {
   return <div className={styles.tokenArtwork} aria-hidden="true">
     <span className={styles.orbit}/><span className={styles.orbitDot}/>
-    <span className={styles.tokenCenter}>A</span>
-    <span className={`${styles.tokenNode} ${styles.nodeOne}`}>◎</span>
-    <span className={`${styles.tokenNode} ${styles.nodeTwo}`}>↗</span>
-    <span className={`${styles.tokenNode} ${styles.nodeThree}`}>S</span>
+    <span className={styles.tokenCenter}><Image src="/anything-logo.svg" alt="" width={48} height={48}/></span>
+    <span className={`${styles.tokenNode} ${styles.nodeOne}`}><Image src={launchpads[0].logo} alt="" width={38} height={38} unoptimized/></span>
+    <span className={`${styles.tokenNode} ${styles.nodeTwo}`}><Image src={launchpads[3].logo} alt="" width={38} height={38} unoptimized/></span>
+    <span className={`${styles.tokenNode} ${styles.nodeThree}`}><Image src={launchpads[6].logo} alt="" width={38} height={38} unoptimized/></span>
   </div>;
 }
 
@@ -124,11 +125,11 @@ export function WalkthroughDemo() {
       </div>
 
       <div className={styles.demoWindow}>
-        <aside className={styles.miniRail} aria-hidden="true"><span className={styles.miniLogo}>A</span><i className={styles.railActive}/><i/><i/><i/></aside>
+        <aside className={styles.miniRail} aria-hidden="true"><span className={styles.miniLogo}><Image src="/anything-logo.svg" alt="" width={35} height={35}/></span><i className={styles.railActive}/><i/><i/><i/></aside>
         <div className={styles.launchFeed}>
           <div className={styles.feedHead}><div><strong>Launch feed</strong><small>Anything workspace</small></div><span>Demo</span></div>
           <article className={styles.feedPost}>
-            <span className={styles.avatar}>A</span><div><strong>Anything <small>@FamAnything · now</small></strong><p>@FamAnything launch Anything Demo across Solana</p><TokenArtwork/></div>
+            <span className={styles.avatar}><Image src="/anything-logo.svg" alt="" width={39} height={39}/></span><div><strong>Anything <small>@FamAnything · now</small></strong><p>@FamAnything launch Anything Demo across Solana</p><TokenArtwork/></div>
           </article>
           <div className={styles.feedStatus} key={activeStage}><span className={styles.feedStatusIcon}>{activeStage === 3 ? <Check size={16}/> : <Zap size={15}/>}</span><div><strong>{active.title}</strong><small>{active.copy}</small></div></div>
           <div className={styles.feedAssurance}><ShieldCheck size={17}/><span><strong>Non-custodial by design</strong><small>Anything never asks for a private key and takes 0%.</small></span></div>
