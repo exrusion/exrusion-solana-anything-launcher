@@ -316,7 +316,7 @@ app.post("/api/prepare/raydium", async (request, response) => {
     if (!apiConfig) throw new Error("Raydium's LaunchLab API did not return its main SOL configuration.");
     const raydium = await Raydium.load({ owner, connection: rpc, cluster: "mainnet", disableFeatureCheck: true, disableLoadToken: true, blockhashCommitment: "confirmed" });
     (raydium.api as unknown as { fetchLaunchConfigs: () => Promise<unknown[]> }).fetchLaunchConfigs = async () => [apiConfig];
-    const created = await raydium.launchpad.createLaunchpad({
+    const buildLaunch = (migrateType: "amm" | "cpmm") => raydium.launchpad.createLaunchpad({
       programId: LAUNCHPAD_PROGRAM,
       mintA: mint.publicKey,
       decimals: 6,
@@ -325,7 +325,7 @@ app.post("/api/prepare/raydium", async (request, response) => {
       uri: input.metadataUri,
       configId,
       configInfo,
-      migrateType: "amm",
+      migrateType,
       mintBDecimals: 9,
       mintBProgram: TOKEN_PROGRAM_ID,
       txVersion: TxVersion.V0,
@@ -334,6 +334,18 @@ app.post("/api/prepare/raydium", async (request, response) => {
       createOnly: input.initialBuyLamports === 0,
       extraSigners: [mint],
     });
+    let migration: "amm" | "cpmm" = "amm";
+    let created = await buildLaunch(migration);
+    let simulation = await rpc.simulateTransaction(created.transactions[0], { sigVerify: false, replaceRecentBlockhash: true, commitment: "processed" });
+    if (simulation.value.err && simulation.value.logs?.some((log) => log.includes("MigrateTypeNotMatch"))) {
+      migration = "cpmm";
+      created = await buildLaunch(migration);
+      simulation = await rpc.simulateTransaction(created.transactions[0], { sigVerify: false, replaceRecentBlockhash: true, commitment: "processed" });
+    }
+    if (simulation.value.err) {
+      const programError = simulation.value.logs?.findLast((log) => log.includes("Error Message:")) || "Raydium rejected the prepared launch transaction.";
+      throw new Error(programError.replace(/^Program log:\s*/, ""));
+    }
     const transactions = created.transactions.map((transaction, index) => ({
       transaction: txToBase64(transaction),
       encoding: "base64",
@@ -341,7 +353,7 @@ app.post("/api/prepare/raydium", async (request, response) => {
       label: index ? `Raydium transaction ${index + 1}` : "Create Raydium LaunchLab token",
     }));
     if (!transactions.length) throw new Error("Raydium did not build a launch transaction.");
-    response.json({ mint: mint.publicKey.toBase58(), transactions, provider: "raydium" });
+    response.json({ mint: mint.publicKey.toBase58(), transactions, migration, provider: "raydium" });
   } catch (error) { response.status(422).json({ error: error instanceof Error ? error.message : "Raydium preparation failed." }); }
 });
 
