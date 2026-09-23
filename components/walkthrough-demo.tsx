@@ -129,7 +129,7 @@ export function WalkthroughDemo() {
         <div className={styles.launchFeed}>
           <div className={styles.feedHead}><div><strong>Launch feed</strong><small>Anything workspace</small></div><span>Demo</span></div>
           <article className={styles.feedPost}>
-            <span className={styles.avatar}><Image src="/anything-logo.png" alt="" width={39} height={39}/></span><div><strong>Anything <small>@FamAnything · now</small></strong><p>@FamAnything launch Anything Demo across Solana</p><TokenArtwork/></div>
+            <span className={styles.avatar}><Image src="/anything-logo.png" alt="" width={39} height={39}/></span><div><strong>Anything <small>@launchsolx · now</small></strong><p>@launchsolx launch Anything Demo across Solana</p><TokenArtwork/></div>
           </article>
           <div className={styles.feedStatus} key={activeStage}><span className={styles.feedStatusIcon}>{activeStage === 3 ? <Check size={16}/> : <Zap size={15}/>}</span><div><strong>{active.title}</strong><small>{active.copy}</small></div></div>
           <div className={styles.feedAssurance}><ShieldCheck size={17}/><span><strong>Non-custodial by design</strong><small>Anything never asks for a private key and takes 0%.</small></span></div>
