@@ -33,7 +33,7 @@ function ProviderMark({ provider, compact = false }: { provider: (typeof launchp
 function TokenArtwork() {
   return <div className={styles.tokenArtwork} aria-hidden="true">
     <span className={styles.orbit}/><span className={styles.orbitDot}/>
-    <span className={styles.tokenCenter}><Image src="/anything-logo.svg" alt="" width={48} height={48}/></span>
+    <span className={styles.tokenCenter}><Image src="/anything-logo.png" alt="" width={48} height={48}/></span>
     <span className={`${styles.tokenNode} ${styles.nodeOne}`}><Image src={launchpads[0].logo} alt="" width={38} height={38} unoptimized/></span>
     <span className={`${styles.tokenNode} ${styles.nodeTwo}`}><Image src={launchpads[3].logo} alt="" width={38} height={38} unoptimized/></span>
     <span className={`${styles.tokenNode} ${styles.nodeThree}`}><Image src={launchpads[6].logo} alt="" width={38} height={38} unoptimized/></span>
@@ -125,11 +125,11 @@ export function WalkthroughDemo() {
       </div>
 
       <div className={styles.demoWindow}>
-        <aside className={styles.miniRail} aria-hidden="true"><span className={styles.miniLogo}><Image src="/anything-logo.svg" alt="" width={35} height={35}/></span><i className={styles.railActive}/><i/><i/><i/></aside>
+        <aside className={styles.miniRail} aria-hidden="true"><span className={styles.miniLogo}><Image src="/anything-logo.png" alt="" width={35} height={35}/></span><i className={styles.railActive}/><i/><i/><i/></aside>
         <div className={styles.launchFeed}>
           <div className={styles.feedHead}><div><strong>Launch feed</strong><small>Anything workspace</small></div><span>Demo</span></div>
           <article className={styles.feedPost}>
-            <span className={styles.avatar}><Image src="/anything-logo.svg" alt="" width={39} height={39}/></span><div><strong>Anything <small>@FamAnything · now</small></strong><p>@FamAnything launch Anything Demo across Solana</p><TokenArtwork/></div>
+            <span className={styles.avatar}><Image src="/anything-logo.png" alt="" width={39} height={39}/></span><div><strong>Anything <small>@FamAnything · now</small></strong><p>@FamAnything launch Anything Demo across Solana</p><TokenArtwork/></div>
           </article>
           <div className={styles.feedStatus} key={activeStage}><span className={styles.feedStatusIcon}>{activeStage === 3 ? <Check size={16}/> : <Zap size={15}/>}</span><div><strong>{active.title}</strong><small>{active.copy}</small></div></div>
           <div className={styles.feedAssurance}><ShieldCheck size={17}/><span><strong>Non-custodial by design</strong><small>Anything never asks for a private key and takes 0%.</small></span></div>

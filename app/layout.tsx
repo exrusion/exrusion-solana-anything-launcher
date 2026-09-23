@@ -10,7 +10,7 @@ import { WalletContext } from "@/components/wallet-context";
 export const metadata: Metadata = {
   title: "Anything Solana — One place to launch anything",
   description: "Launch one token across independent Solana launchpads from one wallet and one clean workspace.",
-  icons: { icon: "/favicon.svg" },
+  icons: { icon: "/anything-logo.png", apple: "/anything-logo.png" },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
